@@ -1,3 +1,4 @@
+
 // src/ai/flows/improve-html-with-ai.ts
 'use server';
 
@@ -34,28 +35,28 @@ const improveHtmlWithAIPrompt = ai.definePrompt({
   name: 'improveHtmlWithAIPrompt',
   input: {schema: ImproveHtmlWithAIInputSchema},
   output: {schema: ImproveHtmlWithAIOutputSchema},
-  prompt: `Eres un asistente de programación experto en diseño web. Tu tarea es mejorar el siguiente fragmento de código HTML, que será insertado dentro del <body> de una página. Presta especial atención a la representación visual y la funcionalidad.
+  prompt: `Eres un modelo de lenguaje de gran tamaño que funciona como asistente de programación embebido en un IDE. Tu tarea es revisar el siguiente CÓDIGO DE FRAGMENTO HTML de una diapositiva y realizar lo siguiente:
 
-**Reglas Críticas:**
-1.  **NO generes un documento HTML completo.** Tu respuesta debe contener **ÚNICAMENTE el código que va dentro del <body>**. No incluyas \`<!DOCTYPE>\`, \`<html>\`, \`<head>\` o \`<body>\` tags.
-2.  **MANTÉN la funcionalidad existente.** Si el código original contiene etiquetas \`<script>\` para interactividad, ¡DEBEN permanecer intactas en tu respuesta!
-3.  **Las ecuaciones ya funcionan.** La página ya carga la librería KaTeX. Para renderizar matemáticas, simplemente usa los delimitadores estándar como \`$$...$$\` para ecuaciones en bloque y \`$...$\` para ecuaciones en línea. NO añadas tus propias librerías de matemáticas.
+**Instrucciones Clave:**
+1.  **Completa el código:** Si el fragmento de código HTML está incompleto, complétalo para asegurar que la diapositiva esté completamente funcional.
+2.  **Mejora la visualización:** Mejora significativamente la representación visual del contenido para lograr una presentación clara, académica y profesional. Esto incluye:
+    *   Asegurarte de que todas las figuras, ecuaciones y tablas se rendericen perfectamente, no como código LaTeX o texto plano.
+    *   Aplicar estilos visuales profesionales (tipografía clara, contraste adecuado, buena organización visual, márgenes y espaciado equilibrados). Puedes usar etiquetas <style> si es necesario.
+    *   Asegurar que el diseño sea responsivo.
+3.  **CONSERVA LA FUNCIONALIDAD ORIGINAL (Regla Crítica):** Debes conservar estrictamente TODAS las funcionalidades originales del código.
+    *   **Scripts:** Si el código original contiene etiquetas \`<script>\`, ¡DEBEN permanecer intactas en tu respuesta! No las elimines ni las modifiques, ya que controlan la interactividad.
+    *   **Animaciones e Interacciones:** Las animaciones preexistentes y los elementos interactivos (botones, menús, etc.) deben seguir funcionando exactamente igual.
+4.  **NO AÑADAS LIBRERÍAS EXTERNAS:**
+    *   **Matemáticas:** La página ya carga la librería KaTeX. Para renderizar matemáticas, simplemente usa los delimitadores estándar como \`$$...$$\` para ecuaciones en bloque y \`$...$\` para ecuaciones en línea. NO añadas tus propias librerías de matemáticas como MathJax o un nuevo enlace a KaTeX.
+    *   **Gráficos:** Si encuentras datos para graficar, usa librerías como Chart.js o Plotly, pero intégralas de forma que no requieran la importación de nuevas librerías en la cabecera del documento.
+5.  **NO GENERES UN DOCUMENTO HTML COMPLETO:** Tu respuesta debe contener **ÚNICAMENTE el código HTML mejorado del FRAGMENTO**, listo para ser insertado dentro del \`<body>\` de una página. No incluyas \`<!DOCTYPE>\`, \`<html>\`, \`<head>\` o \`<body>\` tags.
 
-**Objetivos de Mejora Visual:**
-1.  **Renderiza figuras y tablas:** Asegúrate de que las figuras, ecuaciones y tablas se muestren correctamente, no como código o texto plano.
-2.  **Mejora la estética:** Aplica un formato visual profesional y académico:
-    *   Usa tipografía clara y legible. Puedes usar fuentes como 'Inter', 'serif', 'sans-serif'.
-    *   Aplica una paleta de colores armónica y profesional (por ejemplo, tonos oscuros para el fondo y colores brillantes pero no estridentes para los acentos).
-    *   Asegura una buena distribución de elementos con márgenes y espaciado adecuados.
-    *   Aplica estilos CSS directamente en el HTML usando etiquetas \`<style>\` dentro de tu fragmento si es necesario.
-3.  **Asegura la responsividad:** El diseño debe adaptarse bien a diferentes tamaños de pantalla.
-
-**Código a mejorar:**
+**Código a revisar y mejorar:**
 \`\`\`html
 {{{htmlContent}}}
 \`\`\`
 
-**Instrucción Final:** Proporciona únicamente el código HTML del fragmento mejorado, listo para ser integrado en el proyecto.`,
+**Respuesta final:** Proporciona únicamente el código HTML del fragmento corregido y mejorado, listo para ser integrado directamente en el proyecto.`,
 });
 
 const improveHtmlWithAIFlow = ai.defineFlow(
