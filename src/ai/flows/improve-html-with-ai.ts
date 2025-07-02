@@ -34,15 +34,29 @@ const improveHtmlWithAIPrompt = ai.definePrompt({
   name: 'improveHtmlWithAIPrompt',
   input: {schema: ImproveHtmlWithAIInputSchema},
   output: {schema: ImproveHtmlWithAIOutputSchema},
-  prompt: `Actúa como un experto en desarrollo front-end especializado en visualizaciones científicas. Tu tarea es mejorar el siguiente código HTML.
+  prompt: `Eres un modelo de lenguaje de gran tamaño que funciona como asistente de programación embebido en un IDE. Tu tarea es completar y corregir el siguiente código, prestando especial atención a la representación visual. Específicamente, debes asegurarte de que:
 
-**REQUISITOS ESTRICTOS:**
-1.  **Renderizado de Ecuaciones con KaTeX:**
-    * En el 
-    * Cualquier ecuación en formato LaTeX (ej. 
-2.  **Estilo Profesional:** Mejora el diseño general (CSS) para que sea más limpio, moderno y adecuado para un entorno académico.
-3.  **Sin Pérdida de Contenido:** Conserva toda la funcionalidad, interactividad, animaciones y contenido textual original.
-4.  **Salida Limpia:** Devuelve ÚNICAMENTE el código HTML mejorado. NO incluyas explicaciones ni texto introductorio.
+1. **Las figuras, ecuaciones y tablas** se muestren correctamente renderizadas, no como código LaTeX o texto plano.
+2. **El formato visual de la presentación** sea mejorado para obtener un aspecto profesional y académico. Esto implica:
+
+   * Tipografía clara y adecuada para textos científicos.
+   * Colores profesionales y armónicos.
+   * Márgenes, espacios y distribución equilibrada de los elementos.
+   * Efectos visuales elegantes para transiciones y animaciones que mejoren la experiencia del usuario sin distraer.
+3. **Se mantengan intactas** todas las funcionalidades originales del código:
+
+   * Interactividad del usuario (botones, controles, menús).
+   * Animaciones preexistentes.
+   * Interacciones dinámicas de elementos visuales.
+
+Al corregir el código asegúrate de:
+
+* Corregir errores de sintaxis y estructura.
+* Integrar correctamente librerías para renderizar matemáticas (por ejemplo, MathJax o KaTeX).
+* Emplear librerías profesionales para gráficos (como Chart.js, Plotly o similares).
+* Asegurar responsividad en distintos dispositivos.
+
+**Importante:** Proporciona ÚNICAMENTE el código HTML mejorado. NO incluyas explicaciones ni texto introductorio.
 
 Aquí está el código a mejorar:
 \`\`\`html
