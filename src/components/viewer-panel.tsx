@@ -57,6 +57,44 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
   const currentSlideContent = hasContent ? (slide.content?.[subSlideIndex] || '') : '';
   const totalSubSlides = hasContent ? slide.content!.length : 0;
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+        if (!isPresentationMode || !hasContent) return;
+
+        if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+        const activeEl = document.activeElement;
+        if (activeEl && ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeEl.tagName)) {
+            return;
+        }
+        if (activeEl && (activeEl as HTMLElement).isContentEditable) {
+            return;
+        }
+
+        let handled = false;
+        if (event.key === 'ArrowRight') {
+            if (subSlideIndex < totalSubSlides - 1) {
+                setSubSlideIndex(i => i + 1);
+                handled = true;
+            }
+        } else if (event.key === 'ArrowLeft') {
+            if (subSlideIndex > 0) {
+                setSubSlideIndex(i => i - 1);
+                handled = true;
+            }
+        }
+
+        if (handled) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isPresentationMode, hasContent, subSlideIndex, totalSubSlides]);
+
   const handleSave = useCallback(() => {
     if (!slide) return;
     const newContentArray = [...(slide.content || [])];
