@@ -11,6 +11,12 @@ import { SlideIframe } from './slide-iframe';
 import { improveHtmlWithAI } from '@/ai/flows/improve-html-with-ai';
 import { Card, CardContent } from './ui/card';
 import { Skeleton } from './ui/skeleton';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface ViewerPanelProps {
   slide: IndexItem | null;
@@ -158,11 +164,25 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
 
   return (
     <div className="flex-1 bg-background flex flex-col h-screen relative">
+      <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".html" className="hidden" />
       {!isPresentationMode && (
           <header className="bg-card p-2 flex items-center justify-between text-foreground border-b border-border shrink-0">
             <h2 className="font-bold text-lg truncate px-2">{slide.title}</h2>
             <div className="flex items-center gap-2">
-              <Button onClick={handleAddNewSlide} size="sm"><PlusCircle /> Añadir</Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm"><PlusCircle /> Añadir</Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={handleAddNewSlide}>
+                    Añadir diapositiva en blanco
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
+                    Subir archivo (.html)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              
               {hasContent && !isEditing && <Button onClick={() => setIsEditing(true)} size="sm"><Edit /> Editar</Button>}
               {hasContent && <Button onClick={() => setIsDeleteSubSlideModalOpen(true)} variant="outline" size="sm"><Trash2 /> Borrar Diapositiva</Button>}
               {hasContent && <Button onClick={() => setIsClearModalOpen(true)} variant="destructive" size="sm">Limpiar Todo</Button>}
@@ -199,7 +219,6 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
                   <div className="flex flex-col sm:flex-row gap-4 justify-center">
                     <Button onClick={() => setIsEditing(true)} size="lg">Pegar Código HTML</Button>
                     <Button onClick={() => fileInputRef.current?.click()} variant="secondary" size="lg">Subir Archivo (.html)</Button>
-                    <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".html" className="hidden" />
                   </div>
               </CardContent>
             </Card>
