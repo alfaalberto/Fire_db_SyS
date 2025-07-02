@@ -191,19 +191,29 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
             <ChevronLeft size={24} />
           </Button>
           
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-4">
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10 flex items-center gap-4">
             {isPresentationMode && (
-                <Button
-                    variant="outline"
-                    size="icon"
-                    className="rounded-full h-10 w-10 bg-background/50 hover:bg-background/80"
-                    onClick={() => handleScroll('up')}
-                    title="Desplazar hacia arriba"
-                >
-                    <ChevronUp size={20} />
-                </Button>
+                <div className="flex flex-col gap-2">
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        className="rounded-full h-10 w-10 bg-background/50 hover:bg-background/80"
+                        onClick={() => handleScroll('up')}
+                        title="Desplazar hacia arriba"
+                    >
+                        <ChevronUp size={20} />
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        className="rounded-full h-10 w-10 bg-background/50 hover:bg-background/80"
+                        onClick={() => handleScroll('down')}
+                        title="Desplazar hacia abajo"
+                    >
+                        <ChevronDown size={20} />
+                    </Button>
+                </div>
             )}
-
             <Button
               variant="outline"
               size="icon"
@@ -214,18 +224,6 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
             >
               <ChevronRight size={24} />
             </Button>
-
-            {isPresentationMode && (
-                <Button
-                    variant="outline"
-                    size="icon"
-                    className="rounded-full h-10 w-10 bg-background/50 hover:bg-background/80"
-                    onClick={() => handleScroll('down')}
-                    title="Desplazar hacia abajo"
-                >
-                    <ChevronDown size={20} />
-                </Button>
-            )}
           </div>
         </>
       )}

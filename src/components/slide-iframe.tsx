@@ -18,14 +18,14 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
           <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzOKmrUxK3RETHeao1Nc_ahaxKMLvilv8yG" crossorigin="anonymous"></script>
           <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
           <style>
-            html, body {
-              margin: 0;
-              padding: 0;
+            *, *::before, *::after {
               box-sizing: border-box;
-              height: 100%;
+            }
+            html {
               overflow: auto;
             }
             body { 
+              margin: 0;
               padding: 1.5rem;
               background-color: #111827; 
               color: #E5E7EB;
