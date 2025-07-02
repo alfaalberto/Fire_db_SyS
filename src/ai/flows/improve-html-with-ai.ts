@@ -35,33 +35,21 @@ const improveHtmlWithAIPrompt = ai.definePrompt({
   name: 'improveHtmlWithAIPrompt',
   input: {schema: ImproveHtmlWithAIInputSchema},
   output: {schema: ImproveHtmlWithAIOutputSchema},
-  prompt: `Eres un desarrollador front-end y diseñador UI experto, especializado en refinar código HTML existente para presentaciones académicas y profesionales.
+  prompt: `Eres un asistente de IA especializado en la correcta visualización de notación matemática en HTML. Tu única tarea es procesar el siguiente fragmento de HTML y asegurarte de que todas las expresiones LaTeX se rendericen correctamente utilizando la librería KaTeX.
 
-Tu tarea es tomar el siguiente fragmento de HTML y **mejorar** su presentación visual y completitud, **sin eliminar ni alterar la funcionalidad, estructura o estilos existentes.**
+**Instrucciones precisas:**
 
-**Instrucciones Específicas:**
+1.  **Encuentra y corrige LaTeX:** Localiza todas las expresiones matemáticas escritas en LaTeX (delimitadas por \`$...$\`, \`$$...$$\`, \`\\(...\\)\`, o \`\\[...\\]\`).
+2.  **Asegura la compatibilidad con KaTeX:** Corrige cualquier error de sintaxis dentro de las expresiones LaTeX para que sean válidas para KaTeX.
+3.  **No alteres nada más:** Esta es la regla más importante. **NO DEBES** modificar, añadir o eliminar NADA del código HTML o CSS que no esté directamente relacionado con la corrección de las expresiones LaTeX.
+    *   **NO** cambies estilos.
+    *   **NO** cambies la estructura HTML (etiquetas, atributos, etc.).
+    *   **NO** toques las etiquetas \`<script>\`. Son VITALES.
+    *   **NO** añadas CSS nuevo.
 
-1.  **Renderizado de Contenido Especializado:**
-    *   Si encuentras código LaTeX (delimitado por \`$...$\` o \`$$...$$\`), asegúrate de que esté bien formado para que la librería KaTeX (ya presente en la página) pueda renderizarlo.
-    *   Si encuentras tablas en texto plano, conviértelas a etiquetas HTML estándar (\`<table>\`, \`<tr>\`, \`<td>\`, etc.) con un estilo limpio.
+**REGLA CRÍTICA:** Tu único objetivo es que el LaTeX se vea bien. Si el resto del código ya funciona, no lo toques. Tu respuesta debe ser ÚNICAMENTE el código HTML modificado.
 
-2.  **Mejora de Estilos (Aditiva):**
-    *   Introduce CSS profesional y sutil dentro de una etiqueta \`<style>\` al principio del fragmento.
-    *   Enfócate en mejorar: tipografía (legibilidad, jerarquía de tamaños), contraste de color, espaciado (márgenes y rellenos) y layout.
-    *   **REGLA CLAVE:** No elimines atributos de estilo (\`style="..."\`) o clases CSS existentes. Tu trabajo es *añadir* nuevos estilos o sobreescribir propiedades específicas si es estrictamente necesario para la mejora visual.
-
-3.  **Completar y Corregir HTML:**
-    *   Si el HTML está estructuralmente incompleto (por ejemplo, etiquetas sin cerrar), corrígelo para que sea HTML válido.
-
-**REGLAS CRÍTICAS E INVIOLABLES:**
-
-*   **NO ELIMINAR SCRIPTS:** El código puede contener etiquetas \`<script>\`. Son VITALES para la interactividad. **NO DEBES eliminarlas ni modificarlas bajo ninguna circunstancia.**
-*   **CONSERVAR INTERACTIVIDAD:** Todos los elementos interactivos (botones, animaciones, etc.) deben permanecer 100% funcionales.
-*   **CONSERVAR ESTRUCTURA:** No alteres significativamente la estructura HTML (el árbol DOM). Realiza tus mejoras dentro de la estructura existente.
-*   **NO AÑADIR LIBRERÍAS EXTERNAS:** No enlaces a ninguna librería externa de CSS o JS. El entorno ya provee KaTeX para las matemáticas.
-*   **FORMATO DE SALIDA:** Tu respuesta DEBE ser ÚNICAMENTE el código HTML mejorado del fragmento. No incluyas \`<!DOCTYPE>\`, \`<html>\`, \`<head>\`, ni etiquetas \`<body>\`.
-
-**Código a mejorar:**
+**Código a procesar:**
 \`\`\`html
 {{{htmlContent}}}
 \`\`\`
