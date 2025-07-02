@@ -35,27 +35,37 @@ const improveHtmlWithAIPrompt = ai.definePrompt({
   name: 'improveHtmlWithAIPrompt',
   input: {schema: ImproveHtmlWithAIInputSchema},
   output: {schema: ImproveHtmlWithAIOutputSchema},
-  prompt: `Eres un asistente de programación experto en diseño web y frontend. Tu tarea es analizar el siguiente fragmento de código HTML de una diapositiva y mejorarlo.
+  prompt: `Eres un desarrollador front-end y diseñador UI experto, especializado en refinar código HTML existente para presentaciones académicas y profesionales.
 
-**Instrucciones Clave:**
+Tu tarea es tomar el siguiente fragmento de HTML y **mejorar** su presentación visual y completitud, **sin eliminar ni alterar la funcionalidad, estructura o estilos existentes.**
 
-1.  **Completa el código:** Si el HTML está incompleto, complétalo para que sea válido y funcional.
-2.  **Mejora la Estética:** Aplica un estilo visual profesional y académico.
-    *   **Renderizado Correcto:** Asegúrate de que las ecuaciones matemáticas (usando delimitadores de KaTeX como \`$$...$$\` o \`$...$\`), tablas y figuras se vean como elementos visuales, no como código.
-    *   **Estilos:** Utiliza CSS dentro de etiquetas \`<style>\` si es necesario para mejorar la tipografía, el espaciado y la paleta de colores. El diseño debe ser limpio y moderno.
-3.  **REGLA CRÍTICA - NO ALTERAR FUNCIONALIDAD:**
-    *   **Conserva los Scripts:** ¡NO elimines ni modifiques las etiquetas \`<script>\` existentes! Son esenciales para la interactividad.
-    *   **Conserva la Interacción:** Todos los elementos interactivos (botones, animaciones, etc.) deben seguir funcionando exactamente igual que en el original.
-4.  **RESTRICCIONES TÉCNICAS:**
-    *   **No añadas librerías externas:** La página ya carga la librería KaTeX para matemáticas. No incluyas enlaces a MathJax u otras librerías.
-    *   **Solo el fragmento:** Tu respuesta debe ser ÚNICAMENTE el código HTML mejorado para el \`<body>\`. NO incluyas \`<!DOCTYPE>\`, \`<html>\`, \`<head>\`, o \`<body>\` tags.
+**Instrucciones Específicas:**
+
+1.  **Renderizado de Contenido Especializado:**
+    *   Si encuentras código LaTeX (delimitado por \`$...$\` o \`$$...$$\`), asegúrate de que esté bien formado para que la librería KaTeX (ya presente en la página) pueda renderizarlo.
+    *   Si encuentras tablas en texto plano, conviértelas a etiquetas HTML estándar (\`<table>\`, \`<tr>\`, \`<td>\`, etc.) con un estilo limpio.
+
+2.  **Mejora de Estilos (Aditiva):**
+    *   Introduce CSS profesional y sutil dentro de una etiqueta \`<style>\` al principio del fragmento.
+    *   Enfócate en mejorar: tipografía (legibilidad, jerarquía de tamaños), contraste de color, espaciado (márgenes y rellenos) y layout.
+    *   **REGLA CLAVE:** No elimines atributos de estilo (\`style="..."\`) o clases CSS existentes. Tu trabajo es *añadir* nuevos estilos o sobreescribir propiedades específicas si es estrictamente necesario para la mejora visual.
+
+3.  **Completar y Corregir HTML:**
+    *   Si el HTML está estructuralmente incompleto (por ejemplo, etiquetas sin cerrar), corrígelo para que sea HTML válido.
+
+**REGLAS CRÍTICAS E INVIOLABLES:**
+
+*   **NO ELIMINAR SCRIPTS:** El código puede contener etiquetas \`<script>\`. Son VITALES para la interactividad. **NO DEBES eliminarlas ni modificarlas bajo ninguna circunstancia.**
+*   **CONSERVAR INTERACTIVIDAD:** Todos los elementos interactivos (botones, animaciones, etc.) deben permanecer 100% funcionales.
+*   **CONSERVAR ESTRUCTURA:** No alteres significativamente la estructura HTML (el árbol DOM). Realiza tus mejoras dentro de la estructura existente.
+*   **NO AÑADIR LIBRERÍAS EXTERNAS:** No enlaces a ninguna librería externa de CSS o JS. El entorno ya provee KaTeX para las matemáticas.
+*   **FORMATO DE SALIDA:** Tu respuesta DEBE ser ÚNICAMENTE el código HTML mejorado del fragmento. No incluyas \`<!DOCTYPE>\`, \`<html>\`, \`<head>\`, ni etiquetas \`<body>\`.
 
 **Código a mejorar:**
 \`\`\`html
 {{{htmlContent}}}
 \`\`\`
-
-**Salida:** Proporciona únicamente el código HTML del fragmento mejorado.`,
+`,
 });
 
 const improveHtmlWithAIFlow = ai.defineFlow(
