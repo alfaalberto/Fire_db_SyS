@@ -59,7 +59,7 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-        if (!isPresentationMode || !hasContent) return;
+        if (!hasContent) return;
 
         if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
         const activeEl = document.activeElement;
@@ -72,12 +72,12 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
 
         let handled = false;
         if (event.key === 'ArrowRight') {
-            if (subSlideIndex < totalSubSlides - 1) {
+            if (isPresentationMode && subSlideIndex < totalSubSlides - 1) {
                 setSubSlideIndex(i => i + 1);
                 handled = true;
             }
         } else if (event.key === 'ArrowLeft') {
-            if (subSlideIndex > 0) {
+            if (isPresentationMode && subSlideIndex > 0) {
                 setSubSlideIndex(i => i - 1);
                 handled = true;
             }
@@ -266,15 +266,7 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
           </div>
         )}
       </main>
-
-       {hasContent && !isEditing && !isPresentationMode && (
-        <div className="flex items-center justify-center gap-4 p-2 bg-card border-t border-border">
-          <Button variant="outline" size="sm" disabled={subSlideIndex === 0} onClick={() => setSubSlideIndex(i => i-1)}>Anterior</Button>
-          <span className="text-sm text-muted-foreground font-medium">Diapositiva {subSlideIndex + 1} de {totalSubSlides}</span>
-          <Button variant="outline" size="sm" disabled={subSlideIndex >= totalSubSlides - 1} onClick={() => setSubSlideIndex(i => i+1)}>Siguiente</Button>
-        </div>
-      )}
-
+      
       {isPresentationMode && (
          <Button
             onClick={togglePresentationMode}
@@ -285,6 +277,31 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
         >
             <Minimize size={24} />
         </Button>
+      )}
+
+      {isPresentationMode && hasContent && totalSubSlides > 1 && (
+        <div className="absolute right-4 bottom-4 z-10 flex flex-col gap-2">
+            <Button
+                variant="outline"
+                size="icon"
+                className="rounded-full h-12 w-12 bg-background/50 hover:bg-background/80 disabled:opacity-30"
+                onClick={() => setSubSlideIndex(i => i - 1)}
+                disabled={subSlideIndex === 0}
+                title="Diapositiva anterior (↑)"
+            >
+                <ChevronUp size={24} />
+            </Button>
+            <Button
+                variant="outline"
+                size="icon"
+                className="rounded-full h-12 w-12 bg-background/50 hover:bg-background/80 disabled:opacity-30"
+                onClick={() => setSubSlideIndex(i => i + 1)}
+                disabled={subSlideIndex >= totalSubSlides - 1}
+                title="Siguiente diapositiva (↓)"
+            >
+                <ChevronDown size={24} />
+            </Button>
+        </div>
       )}
 
       {!isEditing && hasContent && (
