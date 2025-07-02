@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useTransition, useCallback } from 'react';
-import { Upload, FileText, Maximize, Minimize, Sparkles, Edit, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Upload, FileText, Maximize, Minimize, Sparkles, Edit, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from 'lucide-react';
 import type { IndexItem } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -29,6 +29,7 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [isImproving, startImproving] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -92,6 +93,16 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
     if(event.target) event.target.value = ''; // Reset file input
   }, [slide, onSave, toast]);
 
+  const handleScroll = useCallback((direction: 'up' | 'down') => {
+    if (iframeRef.current?.contentWindow) {
+      const scrollAmount = iframeRef.current.clientHeight * 0.8;
+      iframeRef.current.contentWindow.scrollBy({
+        top: direction === 'up' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  }, []);
+
   if (!slide) {
     return (
       <div className="flex-1 bg-background flex items-center justify-center p-8">
@@ -136,7 +147,7 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
             </div>
           </div>
         ) : hasContent ? (
-          <SlideIframe content={slide.content!} title={slide.title} />
+          <SlideIframe ref={iframeRef} content={slide.content!} title={slide.title} />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
             <Card className="max-w-lg w-full">
@@ -167,7 +178,7 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
         </Button>
       )}
 
-      {!isEditing && (
+      {!isEditing && hasContent && (
         <>
           <Button
             variant="outline"
@@ -179,19 +190,45 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
           >
             <ChevronLeft size={24} />
           </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full h-12 w-12 z-10 bg-background/50 hover:bg-background/80 disabled:opacity-30"
-            onClick={() => onNavigate(nextSlideId)}
-            disabled={!nextSlideId}
-            title="Siguiente diapositiva (→)"
-          >
-            <ChevronRight size={24} />
-          </Button>
+          
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-4">
+            {isPresentationMode && (
+                <Button
+                    variant="outline"
+                    size="icon"
+                    className="rounded-full h-10 w-10 bg-background/50 hover:bg-background/80"
+                    onClick={() => handleScroll('up')}
+                    title="Desplazar hacia arriba"
+                >
+                    <ChevronUp size={20} />
+                </Button>
+            )}
+
+            <Button
+              variant="outline"
+              size="icon"
+              className="rounded-full h-12 w-12 bg-background/50 hover:bg-background/80 disabled:opacity-30"
+              onClick={() => onNavigate(nextSlideId)}
+              disabled={!nextSlideId}
+              title="Siguiente diapositiva (→)"
+            >
+              <ChevronRight size={24} />
+            </Button>
+
+            {isPresentationMode && (
+                <Button
+                    variant="outline"
+                    size="icon"
+                    className="rounded-full h-10 w-10 bg-background/50 hover:bg-background/80"
+                    onClick={() => handleScroll('down')}
+                    title="Desplazar hacia abajo"
+                >
+                    <ChevronDown size={20} />
+                </Button>
+            )}
+          </div>
         </>
       )}
-
 
       <ConfirmationModal isOpen={isClearModalOpen} onClose={() => setIsClearModalOpen(false)} onConfirm={handleConfirmClear} title="Confirmar Limpieza">
         <p>¿Estás seguro de que quieres eliminar el contenido de esta diapositiva? Esta acción no se puede deshacer.</p>

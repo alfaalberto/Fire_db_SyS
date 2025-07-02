@@ -1,15 +1,13 @@
 "use client";
 
-import React, { useRef } from 'react';
+import React, { forwardRef } from 'react';
 
 interface SlideIframeProps {
   content: string;
   title: string;
 }
 
-export function SlideIframe({ content, title }: SlideIframeProps) {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-
+export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ content, title }, ref) => {
   const fullHtml = `
       <!DOCTYPE html>
       <html lang="es">
@@ -62,11 +60,12 @@ export function SlideIframe({ content, title }: SlideIframeProps) {
 
   return (
     <iframe
-      ref={iframeRef}
+      ref={ref}
       srcDoc={fullHtml}
       title={title}
       className="w-full h-full border-0"
       sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
     />
   );
-}
+});
+SlideIframe.displayName = "SlideIframe";
