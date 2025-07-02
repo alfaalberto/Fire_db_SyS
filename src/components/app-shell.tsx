@@ -5,7 +5,7 @@ import { BookOpen } from 'lucide-react';
 import { IndexPanel } from '@/components/index-panel';
 import { ViewerPanel } from '@/components/viewer-panel';
 import { bookIndex } from '@/lib/constants';
-import { initDB, loadAllSlidesFromDB, saveSlideToDB } from '@/lib/db';
+import { loadAllSlidesFromDB, saveSlideToDB } from '@/lib/db';
 import type { IndexItem } from '@/lib/types';
 import { SidebarProvider, Sidebar, SidebarInset } from '@/components/ui/sidebar';
 import { useToast } from "@/hooks/use-toast";
@@ -53,7 +53,6 @@ export default function AppShell() {
     useEffect(() => {
         const loadData = async () => {
             try {
-                await initDB();
                 const savedSlides = await loadAllSlidesFromDB();
                 const savedSlidesMap = new Map(savedSlides.map(s => [s.id, s.content]));
                 
