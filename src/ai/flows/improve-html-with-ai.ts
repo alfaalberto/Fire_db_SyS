@@ -34,34 +34,28 @@ const improveHtmlWithAIPrompt = ai.definePrompt({
   name: 'improveHtmlWithAIPrompt',
   input: {schema: ImproveHtmlWithAIInputSchema},
   output: {schema: ImproveHtmlWithAIOutputSchema},
-  prompt: `Eres un modelo de lenguaje de gran tamaño que funciona como asistente de programación embebido en un IDE. Tu tarea es completar y corregir el siguiente código, prestando especial atención a la representación visual. Específicamente, debes asegurarte de que:
+  prompt: `Eres un asistente de programación experto en diseño web. Tu tarea es mejorar el siguiente fragmento de código HTML, que será insertado dentro del <body> de una página. Presta especial atención a la representación visual y la funcionalidad.
 
-1. **Las figuras, ecuaciones y tablas** se muestren correctamente renderizadas, no como código LaTeX o texto plano.
-2. **El formato visual de la presentación** sea mejorado para obtener un aspecto profesional y académico. Esto implica:
+**Reglas Críticas:**
+1.  **NO generes un documento HTML completo.** Tu respuesta debe contener **ÚNICAMENTE el código que va dentro del <body>**. No incluyas \`<!DOCTYPE>\`, \`<html>\`, \`<head>\` o \`<body>\` tags.
+2.  **MANTÉN la funcionalidad existente.** Si el código original contiene etiquetas \`<script>\` para interactividad, ¡DEBEN permanecer intactas en tu respuesta!
+3.  **Las ecuaciones ya funcionan.** La página ya carga la librería KaTeX. Para renderizar matemáticas, simplemente usa los delimitadores estándar como \`$$...$$\` para ecuaciones en bloque y \`$...$\` para ecuaciones en línea. NO añadas tus propias librerías de matemáticas.
 
-   * Tipografía clara y adecuada para textos científicos.
-   * Colores profesionales y armónicos.
-   * Márgenes, espacios y distribución equilibrada de los elementos.
-   * Efectos visuales elegantes para transiciones y animaciones que mejoren la experiencia del usuario sin distraer.
-3. **Se mantengan intactas** todas las funcionalidades originales del código:
+**Objetivos de Mejora Visual:**
+1.  **Renderiza figuras y tablas:** Asegúrate de que las figuras, ecuaciones y tablas se muestren correctamente, no como código o texto plano.
+2.  **Mejora la estética:** Aplica un formato visual profesional y académico:
+    *   Usa tipografía clara y legible. Puedes usar fuentes como 'Inter', 'serif', 'sans-serif'.
+    *   Aplica una paleta de colores armónica y profesional (por ejemplo, tonos oscuros para el fondo y colores brillantes pero no estridentes para los acentos).
+    *   Asegura una buena distribución de elementos con márgenes y espaciado adecuados.
+    *   Aplica estilos CSS directamente en el HTML usando etiquetas \`<style>\` dentro de tu fragmento si es necesario.
+3.  **Asegura la responsividad:** El diseño debe adaptarse bien a diferentes tamaños de pantalla.
 
-   * Interactividad del usuario (botones, controles, menús).
-   * Animaciones preexistentes.
-   * Interacciones dinámicas de elementos visuales.
-
-Al corregir el código asegúrate de:
-
-* Corregir errores de sintaxis y estructura.
-* Integrar correctamente librerías para renderizar matemáticas (por ejemplo, MathJax o KaTeX).
-* Emplear librerías profesionales para gráficos (como Chart.js, Plotly o similares).
-* Asegurar responsividad en distintos dispositivos.
-
-**Importante:** Proporciona ÚNICAMENTE el código HTML mejorado. NO incluyas explicaciones ni texto introductorio.
-
-Aquí está el código a mejorar:
+**Código a mejorar:**
 \`\`\`html
 {{{htmlContent}}}
-\`\`\``,
+\`\`\`
+
+**Instrucción Final:** Proporciona únicamente el código HTML del fragmento mejorado, listo para ser integrado en el proyecto.`,
 });
 
 const improveHtmlWithAIFlow = ai.defineFlow(
