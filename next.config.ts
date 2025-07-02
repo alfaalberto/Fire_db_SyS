@@ -1,5 +1,6 @@
 import type {NextConfig} from 'next';
 
+// Triggering a new build to resolve compilation error.
 const nextConfig: NextConfig = {
   /* config options here */
   typescript: {
