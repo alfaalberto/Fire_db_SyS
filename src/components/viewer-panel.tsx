@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useTransition, useCallback } from 'react';
-import { Upload, FileText, Maximize, Minimize, Sparkles, Edit, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from 'lucide-react';
+import { Upload, FileText, Maximize, Minimize, Sparkles, Edit, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, PlusCircle } from 'lucide-react';
 import type { IndexItem } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -14,7 +14,7 @@ import { Skeleton } from './ui/skeleton';
 
 interface ViewerPanelProps {
   slide: IndexItem | null;
-  onSave: (id: string, content: string | null) => void;
+  onSave: (id: string, content: string[] | null) => void;
   onClear: (id: string) => void;
   isPresentationMode: boolean;
   togglePresentationMode: () => void;
@@ -24,45 +24,84 @@ interface ViewerPanelProps {
 }
 
 export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, togglePresentationMode, onNavigate, prevSlideId, nextSlideId }: ViewerPanelProps) {
+  const [subSlideIndex, setSubSlideIndex] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [htmlContent, setHtmlContent] = useState('');
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isDeleteSubSlideModalOpen, setIsDeleteSubSlideModalOpen] = useState(false);
   const [isImproving, startImproving] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    setHtmlContent(slide?.content || '');
+    setSubSlideIndex(0);
+  }, [slide?.id]);
+
+  useEffect(() => {
+    if (slide?.content && slide.content.length > 0) {
+      setHtmlContent(slide.content[subSlideIndex] || '');
+    } else {
+      setHtmlContent('');
+    }
     setIsEditing(false);
-  }, [slide]);
+  }, [slide, subSlideIndex]);
+
+  const hasContent = slide?.content && slide.content.length > 0;
+  const currentSlideContent = hasContent ? (slide.content?.[subSlideIndex] || '') : '';
+  const totalSubSlides = hasContent ? slide.content!.length : 0;
 
   const handleSave = useCallback(() => {
-    if (slide) {
-      onSave(slide.id, htmlContent);
-      setIsEditing(false);
-      toast({ title: "Cambios guardados." });
+    if (!slide) return;
+    const newContentArray = [...(slide.content || [])];
+    if (newContentArray.length === 0) {
+      newContentArray.push(htmlContent);
+    } else {
+      newContentArray[subSlideIndex] = htmlContent;
     }
-  }, [slide, htmlContent, onSave, toast]);
+    onSave(slide.id, newContentArray);
+    setIsEditing(false);
+    toast({ title: "Cambios guardados." });
+  }, [slide, htmlContent, subSlideIndex, onSave, toast]);
+  
+  const handleAddNewSlide = useCallback(() => {
+      if (!slide) return;
+      const newContentArray = [...(slide.content || []), '<h1>Nueva Diapositiva</h1><p>Haz clic en "Editar" para empezar a añadir contenido.</p>'];
+      onSave(slide.id, newContentArray);
+      setSubSlideIndex(newContentArray.length - 1);
+      setIsEditing(false);
+      toast({ title: "Nueva diapositiva añadida." });
+  }, [slide, onSave, toast]);
+  
+  const handleConfirmDeleteSubSlide = useCallback(() => {
+    if (!slide || !slide.content) return;
+    const newContentArray = slide.content.filter((_, i) => i !== subSlideIndex);
+    onSave(slide.id, newContentArray.length > 0 ? newContentArray : null);
+    setSubSlideIndex(prev => Math.max(0, prev - 1));
+    setIsDeleteSubSlideModalOpen(false);
+    toast({ title: "Diapositiva eliminada." });
+  }, [slide, subSlideIndex, onSave, toast]);
 
   const handleConfirmClear = useCallback(() => {
     if (slide) {
       onClear(slide.id);
-      toast({ title: "Contenido eliminado." });
+      toast({ title: "Contenido de la sección eliminado." });
     }
     setIsClearModalOpen(false);
   }, [slide, onClear, toast]);
 
   const handleImproveWithAI = useCallback(() => {
-    if (!htmlContent) {
+    const contentToImprove = isEditing ? htmlContent : currentSlideContent;
+    if (!contentToImprove) {
       toast({ title: "No hay código para mejorar.", variant: "destructive" });
       return;
     }
     startImproving(async () => {
       try {
-        const result = await improveHtmlWithAI({ htmlContent });
+        const result = await improveHtmlWithAI({ htmlContent: contentToImprove });
         if (result && result.improvedHtml) {
           setHtmlContent(result.improvedHtml);
+          setIsEditing(true);
           toast({ title: "Contenido mejorado con IA.", description: "Revisa los cambios y guarda." });
         } else {
           throw new Error("La respuesta de la IA no contiene HTML.");
@@ -72,25 +111,27 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
         toast({ title: "Error de IA", description: (error as Error).message, variant: "destructive" });
       }
     });
-  }, [htmlContent, toast]);
+  }, [htmlContent, currentSlideContent, isEditing, toast]);
 
   const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type === "text/html") {
       const reader = new FileReader();
       reader.onload = (e) => {
-        const content = e.target?.result as string;
-        setHtmlContent(content);
+        const fileContent = e.target?.result as string;
         if (slide) {
-            onSave(slide.id, content);
+          const newContentArray = [...(slide.content || []), fileContent];
+          onSave(slide.id, newContentArray);
+          setSubSlideIndex(newContentArray.length - 1);
+          setIsEditing(false);
+          toast({ title: "Diapositiva importada con éxito." });
         }
-        setIsEditing(false);
       };
       reader.readAsText(file);
     } else {
       toast({ title: "Por favor, selecciona un archivo HTML válido.", variant: "destructive" });
     }
-    if(event.target) event.target.value = ''; // Reset file input
+    if(event.target) event.target.value = '';
   }, [slide, onSave, toast]);
 
   const handleScroll = useCallback((direction: 'up' | 'down') => {
@@ -115,16 +156,16 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
     );
   }
 
-  const hasContent = slide.content && slide.content.trim() !== '';
-
   return (
     <div className="flex-1 bg-background flex flex-col h-screen relative">
       {!isPresentationMode && (
           <header className="bg-card p-2 flex items-center justify-between text-foreground border-b border-border shrink-0">
             <h2 className="font-bold text-lg truncate px-2">{slide.title}</h2>
             <div className="flex items-center gap-2">
+              <Button onClick={handleAddNewSlide} size="sm"><PlusCircle /> Añadir</Button>
               {hasContent && !isEditing && <Button onClick={() => setIsEditing(true)} size="sm"><Edit /> Editar</Button>}
-              {hasContent && <Button onClick={() => setIsClearModalOpen(true)} variant="destructive" size="sm"><Trash2 /> Limpiar</Button>}
+              {hasContent && <Button onClick={() => setIsDeleteSubSlideModalOpen(true)} variant="outline" size="sm"><Trash2 /> Borrar Diapositiva</Button>}
+              {hasContent && <Button onClick={() => setIsClearModalOpen(true)} variant="destructive" size="sm">Limpiar Todo</Button>}
               <Button onClick={togglePresentationMode} variant="ghost" size="icon" disabled={!hasContent} title="Modo presentación">
                 <Maximize size={18} />
               </Button>
@@ -137,9 +178,9 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
           <div className="p-4 h-full flex flex-col gap-4">
             <Textarea value={htmlContent} onChange={(e) => setHtmlContent(e.target.value)} placeholder="Pega aquí el código HTML de tu diapositiva..." className="w-full flex-1 bg-background/50 text-foreground p-4 rounded-md border-border focus:ring-2 focus:ring-primary focus:outline-none font-code text-sm resize-none" />
             <div className="flex justify-between items-center">
-              <Button onClick={handleImproveWithAI} className="bg-purple-600 hover:bg-purple-500 text-white" disabled={isImproving}>
-                {isImproving ? <><Skeleton className="h-4 w-4 mr-2 rounded-full animate-spin" /> Mejorando...</> : <><Sparkles size={16} /> Mejorar con IA</>}
-              </Button>
+               <Button onClick={handleImproveWithAI} className="bg-purple-600 hover:bg-purple-500 text-white" disabled={isImproving}>
+                 {isImproving ? <><Skeleton className="h-4 w-4 mr-2 rounded-full animate-spin" /> Mejorando...</> : <><Sparkles size={16} /> Mejorar con IA</>}
+               </Button>
               <div className="flex gap-2">
                 <Button onClick={() => setIsEditing(false)} variant="secondary">Cancelar</Button>
                 <Button onClick={handleSave} className="bg-green-600 hover:bg-green-500 text-white">Guardar Cambios</Button>
@@ -147,7 +188,7 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
             </div>
           </div>
         ) : hasContent ? (
-          <SlideIframe ref={iframeRef} content={slide.content!} title={slide.title} />
+          <SlideIframe ref={iframeRef} content={currentSlideContent} title={slide.title} />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8">
             <Card className="max-w-lg w-full">
@@ -165,6 +206,14 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
           </div>
         )}
       </main>
+
+       {hasContent && !isEditing && !isPresentationMode && (
+        <div className="flex items-center justify-center gap-4 p-2 bg-card border-t border-border">
+          <Button variant="outline" size="sm" disabled={subSlideIndex === 0} onClick={() => setSubSlideIndex(i => i-1)}>Anterior</Button>
+          <span className="text-sm text-muted-foreground font-medium">Diapositiva {subSlideIndex + 1} de {totalSubSlides}</span>
+          <Button variant="outline" size="sm" disabled={subSlideIndex >= totalSubSlides - 1} onClick={() => setSubSlideIndex(i => i+1)}>Siguiente</Button>
+        </div>
+      )}
 
       {isPresentationMode && (
          <Button
@@ -186,7 +235,7 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
             className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full h-12 w-12 z-10 bg-background/50 hover:bg-background/80 disabled:opacity-30"
             onClick={() => onNavigate(prevSlideId)}
             disabled={!prevSlideId}
-            title="Diapositiva anterior (←)"
+            title="Sección anterior (←)"
           >
             <ChevronLeft size={24} />
           </Button>
@@ -194,42 +243,23 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
           <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10 flex items-center gap-4">
             {isPresentationMode && (
                 <div className="flex flex-col gap-2">
-                    <Button
-                        variant="outline"
-                        size="icon"
-                        className="rounded-full h-10 w-10 bg-background/50 hover:bg-background/80"
-                        onClick={() => handleScroll('up')}
-                        title="Desplazar hacia arriba"
-                    >
-                        <ChevronUp size={20} />
-                    </Button>
-                    <Button
-                        variant="outline"
-                        size="icon"
-                        className="rounded-full h-10 w-10 bg-background/50 hover:bg-background/80"
-                        onClick={() => handleScroll('down')}
-                        title="Desplazar hacia abajo"
-                    >
-                        <ChevronDown size={20} />
-                    </Button>
+                    <Button variant="outline" size="icon" className="rounded-full h-10 w-10 bg-background/50 hover:bg-background/80" onClick={() => handleScroll('up')} title="Desplazar hacia arriba"><ChevronUp size={20} /></Button>
+                    <Button variant="outline" size="icon" className="rounded-full h-10 w-10 bg-background/50 hover:bg-background/80" onClick={() => handleScroll('down')} title="Desplazar hacia abajo"><ChevronDown size={20} /></Button>
                 </div>
             )}
-            <Button
-              variant="outline"
-              size="icon"
-              className="rounded-full h-12 w-12 bg-background/50 hover:bg-background/80 disabled:opacity-30"
-              onClick={() => onNavigate(nextSlideId)}
-              disabled={!nextSlideId}
-              title="Siguiente diapositiva (→)"
-            >
+            <Button variant="outline" size="icon" className="rounded-full h-12 w-12 bg-background/50 hover:bg-background/80 disabled:opacity-30" onClick={() => onNavigate(nextSlideId)} disabled={!nextSlideId} title="Sección siguiente (→)">
               <ChevronRight size={24} />
             </Button>
           </div>
         </>
       )}
 
-      <ConfirmationModal isOpen={isClearModalOpen} onClose={() => setIsClearModalOpen(false)} onConfirm={handleConfirmClear} title="Confirmar Limpieza">
-        ¿Estás seguro de que quieres eliminar el contenido de esta diapositiva? Esta acción no se puede deshacer.
+      <ConfirmationModal isOpen={isClearModalOpen} onClose={() => setIsClearModalOpen(false)} onConfirm={handleConfirmClear} title="Confirmar Limpieza Total">
+        ¿Estás seguro de que quieres eliminar <strong>todas las diapositivas</strong> de esta sección? Esta acción no se puede deshacer.
+      </ConfirmationModal>
+
+       <ConfirmationModal isOpen={isDeleteSubSlideModalOpen} onClose={() => setIsDeleteSubSlideModalOpen(false)} onConfirm={handleConfirmDeleteSubSlide} title="Confirmar Eliminación">
+        ¿Estás seguro de que quieres eliminar la diapositiva actual ({subSlideIndex + 1} de {totalSubSlides})? Esta acción no se puede deshacer.
       </ConfirmationModal>
     </div>
   );

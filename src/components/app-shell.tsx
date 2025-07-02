@@ -21,7 +21,7 @@ const findSlideById = (nodes: IndexItem[], id: string): IndexItem | null => {
     return null;
 };
 
-const updateSlideContent = (nodes: IndexItem[], id: string, content: string | null): IndexItem[] => {
+const updateSlideContent = (nodes: IndexItem[], id: string, content: string[] | null): IndexItem[] => {
     return nodes.map(node => {
         if (node.id === id) return { ...node, content: content };
         if (node.children) return { ...node, children: updateSlideContent(node.children, id, content) };
@@ -95,7 +95,7 @@ export default function AppShell() {
         loadData();
     }, [toast, activeSlideId]);
 
-    const handleSaveSlide = useCallback(async (id: string, content: string | null) => {
+    const handleSaveSlide = useCallback(async (id: string, content: string[] | null) => {
         try {
             await saveSlideToDB(id, content);
             setSlidesData(prevData => updateSlideContent(prevData, id, content));
