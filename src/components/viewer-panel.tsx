@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useTransition, useCallback } from 'react';
-import { Upload, FileText, Maximize, Minimize, Sparkles, Edit, Trash2 } from 'lucide-react';
+import { Upload, FileText, Maximize, Minimize, Sparkles, Edit, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { IndexItem } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,9 +18,12 @@ interface ViewerPanelProps {
   onClear: (id: string) => void;
   isPresentationMode: boolean;
   togglePresentationMode: () => void;
+  onNavigate: (slideId: string | null) => void;
+  prevSlideId: string | null;
+  nextSlideId: string | null;
 }
 
-export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, togglePresentationMode }: ViewerPanelProps) {
+export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, togglePresentationMode, onNavigate, prevSlideId, nextSlideId }: ViewerPanelProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [htmlContent, setHtmlContent] = useState('');
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
@@ -104,7 +107,7 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
   const hasContent = slide.content && slide.content.trim() !== '';
 
   return (
-    <div className="flex-1 bg-background flex flex-col h-screen">
+    <div className="flex-1 bg-background flex flex-col h-screen relative">
       <header className="bg-card p-2 flex items-center justify-between text-foreground border-b border-border shrink-0">
         <h2 className="font-bold text-lg truncate px-2">{slide.title}</h2>
         <div className="flex items-center gap-2">
@@ -149,6 +152,32 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
           </div>
         )}
       </main>
+
+      {!isEditing && (
+        <>
+          <Button
+            variant="outline"
+            size="icon"
+            className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full h-12 w-12 z-10 bg-background/50 hover:bg-background/80 disabled:opacity-30"
+            onClick={() => onNavigate(prevSlideId)}
+            disabled={!prevSlideId}
+            title="Diapositiva anterior (←)"
+          >
+            <ChevronLeft size={24} />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full h-12 w-12 z-10 bg-background/50 hover:bg-background/80 disabled:opacity-30"
+            onClick={() => onNavigate(nextSlideId)}
+            disabled={!nextSlideId}
+            title="Siguiente diapositiva (→)"
+          >
+            <ChevronRight size={24} />
+          </Button>
+        </>
+      )}
+
 
       <ConfirmationModal isOpen={isClearModalOpen} onClose={() => setIsClearModalOpen(false)} onConfirm={handleConfirmClear} title="Confirmar Limpieza">
         <p>¿Estás seguro de que quieres eliminar el contenido de esta diapositiva? Esta acción no se puede deshacer.</p>

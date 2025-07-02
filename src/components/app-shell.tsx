@@ -29,6 +29,19 @@ const updateSlideContent = (nodes: IndexItem[], id: string, content: string | nu
     });
 };
 
+const getFlatSlideIds = (items: IndexItem[]): string[] => {
+    const ids: string[] = [];
+    const traverse = (nodes: IndexItem[]) => {
+        for (const node of nodes) {
+            ids.push(node.id);
+            if (node.children) {
+                traverse(node.children);
+            }
+        }
+    };
+    traverse(items);
+    return ids;
+};
 
 export default function AppShell() {
     const [slidesData, setSlidesData] = useState<IndexItem[]>([]);
@@ -52,7 +65,16 @@ export default function AppShell() {
                     }));
                 };
 
-                setSlidesData(mergeContent(bookIndex));
+                const initialSlidesData = mergeContent(bookIndex);
+                setSlidesData(initialSlidesData);
+                
+                if (!activeSlideId) {
+                    const flatIds = getFlatSlideIds(initialSlidesData);
+                    if (flatIds.length > 0) {
+                        setActiveSlideId(flatIds[0]);
+                    }
+                }
+
             } catch (error) {
                 console.error("No se pudo cargar la base de datos:", error);
                 toast({
@@ -61,12 +83,18 @@ export default function AppShell() {
                     description: "No se pudo cargar el contenido guardado. Se usará el índice por defecto.",
                 })
                 setSlidesData(bookIndex);
+                 if (!activeSlideId) {
+                    const flatIds = getFlatSlideIds(bookIndex);
+                    if (flatIds.length > 0) {
+                        setActiveSlideId(flatIds[0]);
+                    }
+                }
             } finally {
                 setIsLoading(false);
             }
         };
         loadData();
-    }, [toast]);
+    }, [toast, activeSlideId]);
 
     const handleSaveSlide = useCallback(async (id: string, content: string | null) => {
         try {
@@ -90,6 +118,49 @@ export default function AppShell() {
         if (!activeSlideId || !slidesData.length) return null;
         return findSlideById(slidesData, activeSlideId);
     }, [activeSlideId, slidesData]);
+
+    const { prevSlideId, nextSlideId } = useMemo(() => {
+        if (!activeSlideId) return { prevSlideId: null, nextSlideId: null };
+        const flatSlideIds = getFlatSlideIds(slidesData);
+        const currentIndex = flatSlideIds.indexOf(activeSlideId);
+        if (currentIndex === -1) return { prevSlideId: null, nextSlideId: null };
+
+        const prev = currentIndex > 0 ? flatSlideIds[currentIndex - 1] : null;
+        const next = currentIndex < flatSlideIds.length - 1 ? flatSlideIds[currentIndex + 1] : null;
+
+        return { prevSlideId: prev, nextSlideId: next };
+    }, [activeSlideId, slidesData]);
+
+    const handleNavigate = useCallback((slideId: string | null) => {
+        if (slideId) {
+            setActiveSlideId(slideId);
+        }
+    }, []);
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+            
+            const activeEl = document.activeElement;
+            if (activeEl && ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeEl.tagName)) {
+                return;
+            }
+            if (activeEl && (activeEl as HTMLElement).isContentEditable) {
+                return;
+            }
+
+            if (event.key === 'ArrowRight' && nextSlideId) {
+                handleNavigate(nextSlideId);
+            } else if (event.key === 'ArrowLeft' && prevSlideId) {
+                handleNavigate(prevSlideId);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [prevSlideId, nextSlideId, handleNavigate]);
 
     if (isLoading) {
         return (
@@ -121,6 +192,9 @@ export default function AppShell() {
                         onClear={handleClearSlide}
                         isPresentationMode={isPresentationMode}
                         togglePresentationMode={() => setIsPresentationMode(p => !p)}
+                        onNavigate={handleNavigate}
+                        prevSlideId={prevSlideId}
+                        nextSlideId={nextSlideId}
                     />
                 </SidebarInset>
              </SidebarProvider>
