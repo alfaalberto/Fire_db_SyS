@@ -108,16 +108,18 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
 
   return (
     <div className="flex-1 bg-background flex flex-col h-screen relative">
-      <header className="bg-card p-2 flex items-center justify-between text-foreground border-b border-border shrink-0">
-        <h2 className="font-bold text-lg truncate px-2">{slide.title}</h2>
-        <div className="flex items-center gap-2">
-          {hasContent && !isEditing && <Button onClick={() => setIsEditing(true)} size="sm"><Edit /> Editar</Button>}
-          {hasContent && <Button onClick={() => setIsClearModalOpen(true)} variant="destructive" size="sm"><Trash2 /> Limpiar</Button>}
-          <Button onClick={togglePresentationMode} variant="ghost" size="icon" disabled={!hasContent} title={isPresentationMode ? "Salir del modo presentación" : "Modo presentación"}>
-            {isPresentationMode ? <Minimize size={18} /> : <Maximize size={18} />}
-          </Button>
-        </div>
-      </header>
+      {!isPresentationMode && (
+          <header className="bg-card p-2 flex items-center justify-between text-foreground border-b border-border shrink-0">
+            <h2 className="font-bold text-lg truncate px-2">{slide.title}</h2>
+            <div className="flex items-center gap-2">
+              {hasContent && !isEditing && <Button onClick={() => setIsEditing(true)} size="sm"><Edit /> Editar</Button>}
+              {hasContent && <Button onClick={() => setIsClearModalOpen(true)} variant="destructive" size="sm"><Trash2 /> Limpiar</Button>}
+              <Button onClick={togglePresentationMode} variant="ghost" size="icon" disabled={!hasContent} title="Modo presentación">
+                <Maximize size={18} />
+              </Button>
+            </div>
+          </header>
+      )}
 
       <main className="flex-1 overflow-y-auto">
         {isEditing ? (
@@ -152,6 +154,18 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
           </div>
         )}
       </main>
+
+      {isPresentationMode && (
+         <Button
+            onClick={togglePresentationMode}
+            variant="ghost"
+            size="icon"
+            className="absolute top-4 right-4 z-20 bg-background/50 hover:bg-background/80 rounded-full h-12 w-12"
+            title="Salir del modo presentación"
+        >
+            <Minimize size={24} />
+        </Button>
+      )}
 
       {!isEditing && (
         <>
