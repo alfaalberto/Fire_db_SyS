@@ -229,7 +229,7 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
       )}
 
       <ConfirmationModal isOpen={isClearModalOpen} onClose={() => setIsClearModalOpen(false)} onConfirm={handleConfirmClear} title="Confirmar Limpieza">
-        <p>¿Estás seguro de que quieres eliminar el contenido de esta diapositiva? Esta acción no se puede deshacer.</p>
+        ¿Estás seguro de que quieres eliminar el contenido de esta diapositiva? Esta acción no se puede deshacer.
       </ConfirmationModal>
     </div>
   );
