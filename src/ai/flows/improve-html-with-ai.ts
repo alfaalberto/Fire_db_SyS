@@ -35,19 +35,17 @@ const improveHtmlWithAIPrompt = ai.definePrompt({
   name: 'improveHtmlWithAIPrompt',
   input: {schema: ImproveHtmlWithAIInputSchema},
   output: {schema: ImproveHtmlWithAIOutputSchema},
-  prompt: `Eres un asistente de IA especializado en la correcta visualización de notación matemática en HTML. Tu única tarea es procesar el siguiente fragmento de HTML y asegurarte de que todas las expresiones LaTeX se rendericen correctamente utilizando la librería KaTeX.
+  prompt: `Tu tarea principal y más importante es asegurar que TODAS las ecuaciones y variables matemáticas en el siguiente fragmento de HTML se rendericen correctamente y estén elegantemente estilizadas.
 
-**Instrucciones precisas:**
+Instrucciones:
 
-1.  **Encuentra y corrige LaTeX:** Localiza todas las expresiones matemáticas escritas en LaTeX (delimitadas por \`$...$\`, \`$$...$$\`, \`\\(...\\)\`, o \`\\[...\\]\`).
-2.  **Asegura la compatibilidad con KaTeX:** Corrige cualquier error de sintaxis dentro de las expresiones LaTeX para que sean válidas para KaTeX.
-3.  **No alteres nada más:** Esta es la regla más importante. **NO DEBES** modificar, añadir o eliminar NADA del código HTML o CSS que no esté directamente relacionado con la corrección de las expresiones LaTeX.
-    *   **NO** cambies estilos.
-    *   **NO** cambies la estructura HTML (etiquetas, atributos, etc.).
-    *   **NO** toques las etiquetas \`<script>\`. Son VITALES.
-    *   **NO** añadas CSS nuevo.
+1.  **Identifica todo el contenido matemático:** Encuentra cada expresión LaTeX. Usualmente están encerradas en \`$ ... $\`, \`$$ ... $$\`, \`\\( ... \\)\`, o \`\\[ ... \\]\`.
+2.  **Asegura la correcta renderización:** Corrige cualquier error de sintaxis dentro de las expresiones LaTeX para que sean compatibles con la librería KaTeX. El objetivo es una notación matemática perfecta.
+3.  **Aplica estilos a las matemáticas:** Puedes y debes aplicar estilos a los elementos matemáticos para asegurar que estén bien formateados. Esto puede incluir centrar las ecuaciones de bloque (\`$$...$$\` o \`\\[...\\]\`) o asegurar que tengan márgenes adecuados. Las ecuaciones en línea (\`$...$\` o \`\\(...\\)\`) deben fluir naturalmente con el texto.
+4.  **REGLA CRÍTICA: NO TOQUES NADA MÁS:** No modifiques ningún otro elemento HTML, CSS, o etiquetas \`<script>\`. La funcionalidad existente y el estilo general de la página DEBEN permanecer idénticos. Tu único trabajo es arreglar las matemáticas.
+5.  **IMPORTANTE:** El código que recibes es un fragmento de \`<body>\`, no una página HTML completa. No añadas \`<html>\`, \`<head>\`, o \`<body>\` a tu respuesta. Mantén intactas las etiquetas \`<script>\` existentes, ya que son VITALES para la interactividad.
 
-**REGLA CRÍTICA:** Tu único objetivo es que el LaTeX se vea bien. Si el resto del código ya funciona, no lo toques. Tu respuesta debe ser ÚNICAMENTE el código HTML modificado.
+Tu respuesta debe ser únicamente el código HTML corregido.
 
 **Código a procesar:**
 \`\`\`html
