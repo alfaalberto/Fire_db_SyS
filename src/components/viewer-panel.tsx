@@ -60,11 +60,14 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
   const handleSave = useCallback(() => {
     if (!slide) return;
     const newContentArray = [...(slide.content || [])];
+    
+    // If the array is empty, we are adding the first slide. Otherwise, update the existing one.
     if (newContentArray.length === 0) {
-      newContentArray.push(htmlContent);
+        newContentArray.push(htmlContent);
     } else {
-      newContentArray[subSlideIndex] = htmlContent;
+        newContentArray[subSlideIndex] = htmlContent;
     }
+
     onSave(slide.id, newContentArray);
     setIsEditing(false);
     toast({ title: "Cambios guardados." });
