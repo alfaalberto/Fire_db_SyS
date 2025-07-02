@@ -1,30 +1,62 @@
 "use client";
 
-import { db } from './firebase';
-import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
+const DB_NAME = 'SlideSageDB';
+const STORE_NAME = 'slides';
+const DB_VERSION = 1;
+
+const openDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || !window.indexedDB) {
+      return reject(new Error('IndexedDB is not supported.'));
+    }
+
+    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = () => reject(new Error('Error opening IndexedDB.'));
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+    };
+  });
+};
 
 export const saveSlideToDB = async (id: string, content: string | null): Promise<void> => {
   try {
-    const slideRef = doc(db, 'slides', id);
-    // Using setDoc with merge: true will create the doc if it doesn't exist,
-    // or update it if it does. This is useful if we add more fields later.
-    await setDoc(slideRef, { content }, { merge: true });
+    const db = await openDB();
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    store.put({ id, content });
+    
+    return new Promise((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(new Error('Failed to save slide.'));
+    });
   } catch (error) {
-    console.error("Error saving slide to Firestore:", error);
-    throw error; // Re-throw the error to be caught by the caller
+    console.error("Error saving slide to IndexedDB:", error);
+    throw error;
   }
 };
 
 export const loadAllSlidesFromDB = async (): Promise<{id: string, content: string | null}[]> => {
   try {
-    const slidesCollectionRef = collection(db, 'slides');
-    const querySnapshot = await getDocs(slidesCollectionRef);
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      content: doc.data().content || null
-    }));
+    const db = await openDB();
+    const transaction = db.transaction([STORE_NAME], 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.getAll();
+
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => {
+        resolve(request.result || []);
+      };
+      request.onerror = () => {
+        reject(new Error('Failed to load slides.'));
+      };
+    });
   } catch (error) {
-    console.error("Error loading slides from Firestore:", error);
+    console.error("Error loading slides from IndexedDB:", error);
     throw error;
   }
 };
