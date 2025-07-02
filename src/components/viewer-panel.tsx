@@ -99,7 +99,6 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
     if (!slide) return;
     const newContentArray = [...(slide.content || [])];
     
-    // If the array is empty, we are adding the first slide. Otherwise, update the existing one.
     if (newContentArray.length === 0) {
         newContentArray.push(htmlContent);
     } else {
@@ -266,6 +265,29 @@ export function ViewerPanel({ slide, onSave, onClear, isPresentationMode, toggle
           </div>
         )}
       </main>
+
+      {!isEditing && !isPresentationMode && hasContent && totalSubSlides > 1 && (
+        <footer className="bg-card p-2 flex items-center justify-center gap-4 text-foreground border-t border-border shrink-0">
+          <Button
+            onClick={() => setSubSlideIndex(i => i - 1)}
+            disabled={subSlideIndex === 0}
+            variant="outline"
+            size="sm"
+          >
+            Anterior
+          </Button>
+          <span className="text-sm text-muted-foreground tabular-nums">
+            Diapositiva {subSlideIndex + 1} de {totalSubSlides}
+          </span>
+          <Button
+            onClick={() => setSubSlideIndex(i => i + 1)}
+            disabled={subSlideIndex >= totalSubSlides - 1}
+            size="sm"
+          >
+            Siguiente
+          </Button>
+        </footer>
+      )}
       
       {isPresentationMode && (
          <Button
