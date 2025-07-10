@@ -4,6 +4,6 @@
 runConfig:
   # Increase this value if you'd like to automatically spin up
   # more instances in response to increased traffic.
-  maxInstances: 2
+  maxInstances: 3
 
-# Triggering a new build to resolve compilation error by ensuring all code is pushed to the repository.
+# Triggering a new build to resolve the compilation error by ensuring all code is pushed to the repository.
