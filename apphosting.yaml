@@ -7,4 +7,3 @@ runConfig:
   maxInstances: 5
 
 # Forzando una nueva compilación final para subir todo el código al repositorio.
-# Último cambio para activar la compilación desde GitHub.
