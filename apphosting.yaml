@@ -6,4 +6,5 @@ runConfig:
   # more instances in response to increased traffic.
   maxInstances: 5
 
-# Forzando una nueva compilación final para subir todo el código al repositorio correcto.
+# Forzando una nueva compilación final para subir todo el código al repositorio.
+# Último cambio para activar la compilación desde GitHub.
