@@ -93,7 +93,7 @@ export default function AppShell() {
             }
         };
         loadData();
-    }, [toast, activeSlideId]);
+    }, [toast]);
 
     const handleSaveSlide = useCallback(async (id: string, content: string[] | null) => {
         try {
