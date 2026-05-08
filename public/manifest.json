@@ -1,0 +1,21 @@
+{
+  "name": "Señales y Sistemas",
+  "short_name": "SyS",
+  "description": "Plataforma interactiva para el curso de Señales y Sistemas",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f1a",
+  "theme_color": "#2dd4bf",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
