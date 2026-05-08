@@ -237,9 +237,14 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
           var s=isPresentation?Math.min(1,aw/w,ah/h):Math.min(1,aw/w);
           if(!isFinite(s)||s<=0||s>=0.999)return;if(!forceFit&&s<0.2)s=0.2;
           var sw=Math.max(1,Math.round(w*s));var sh=Math.max(1,Math.round(h*s));
-          frameEl.style.width=sw+'px';frameEl.style.height=sh+'px';frameEl.style.overflow='hidden';
-          try{viewport.style.alignItems=(sh<=ah*0.98)?'center':'flex-start';}catch(e){}
-          scaleEl.style.width=w+'px';scaleEl.style.height=h+'px';scaleEl.style.transformOrigin='top center';scaleEl.style.transform='scale('+s+')';
+          if(isPresentation||isThumbnail){
+            frameEl.style.width=sw+'px';frameEl.style.height=sh+'px';frameEl.style.overflow='hidden';
+            try{viewport.style.alignItems=(sh<=ah*0.98)?'center':'flex-start';}catch(e){}
+          }else{
+            frameEl.style.width=sw+'px';frameEl.style.height='';frameEl.style.overflow='';
+            try{viewport.style.alignItems='flex-start';}catch(e){}
+          }
+          scaleEl.style.width=w+'px';scaleEl.style.height='';scaleEl.style.transformOrigin='top center';scaleEl.style.transform='scale('+s+')';
         }catch(e){}
       }
       var timer=null;function schedule(){try{if(timer)clearTimeout(timer);}catch(e){}timer=setTimeout(function(){timer=null;fit();},60);}
