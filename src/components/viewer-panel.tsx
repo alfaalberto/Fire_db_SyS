@@ -419,7 +419,7 @@ export function ViewerPanel({ slide, index, canPresent, onSave, onRelocate, isPr
         </header>
       )}
 
-      <main className={cn("flex-1 min-h-0", isEditing ? "overflow-y-auto" : "overflow-hidden")}>
+      <main className={cn("flex-1 min-h-0", isEditing ? "overflow-y-auto" : "overflow-hidden relative")}>
         {isEditing ? (
           <div className="flex flex-col h-full overflow-hidden">
             <div className="p-2 bg-muted border-b border-border flex flex-wrap gap-2 shrink-0">

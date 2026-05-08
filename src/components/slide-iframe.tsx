@@ -120,9 +120,9 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
         *, *::before, *::after { box-sizing:border-box; }
         html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background-color:#0d1b2a; color:#E5E7EB; font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.6; }
         #__slide_viewport { width:100%; height:100%; overflow:auto; padding:0; }
-        #__slide_frame { display:block; width:100%; min-height:100%; }
-        #__slide_scale { display:block; width:100%; min-height:100%; }
-        #__slide_content { width:100%; min-height:100%; }
+        #__slide_frame { display:block; min-height:100%; }
+        #__slide_scale { display:block; min-height:100%; }
+        #__slide_content { min-height:100%; }
         html[data-thumbnail="true"] #__slide_frame, html[data-thumbnail="true"] #__slide_scale { display:inline-block; }
         html[data-thumbnail="true"] #__slide_viewport { overflow:hidden!important; padding:0!important; align-items:center!important; justify-content:center!important; }
         html[data-thumbnail="true"] #__slide_content, html[data-thumbnail="true"] #__slide_content * { max-width:none!important; }
@@ -229,22 +229,16 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
           var vw=viewport.clientWidth||0;var vh=viewport.clientHeight||0;if(vw<=0||vh<=0)return;
           var padX=0;var padY=0;try{var cs=window.getComputedStyle(viewport);padX=(parseFloat(cs.paddingLeft||'0')||0)+(parseFloat(cs.paddingRight||'0')||0);padY=(parseFloat(cs.paddingTop||'0')||0)+(parseFloat(cs.paddingBottom||'0')||0);}catch(e){}
           var aw=Math.max(0,vw-padX);var ah=Math.max(0,vh-padY);if(aw<=0||ah<=0)return;
-          if(false)return;
           if(isThumbnail){var baseW=1280;var baseH=720;var s0=Math.min(1,aw/baseW,ah/baseH);if(!isFinite(s0)||s0<=0)return;try{contentEl.style.width=baseW+'px';}catch(e){}try{contentEl.style.height=baseH+'px';}catch(e){}try{contentEl.style.overflow='hidden';}catch(e){}scaleEl.style.width=baseW+'px';scaleEl.style.height=baseH+'px';scaleEl.style.transformOrigin='top left';scaleEl.style.transform='scale('+s0+')';frameEl.style.width=Math.max(1,Math.round(baseW*s0))+'px';frameEl.style.height=Math.max(1,Math.round(baseH*s0))+'px';frameEl.style.overflow='hidden';return;}
           var kids=Array.prototype.slice.call(contentEl.children||[]).filter(function(n){try{var tag=(n&&n.tagName)?String(n.tagName).toUpperCase():'';return tag&&tag!=='SCRIPT'&&tag!=='STYLE';}catch(e){return false;}});
           var target=(kids.length===1)?kids[0]:contentEl;var d=dims(target);var w=d.w,h=d.h;if(!w||!h){var d2=dims(contentEl);w=w||d2.w;h=h||d2.h;}
           if(!w||!h)return;
-          var s=isPresentation?Math.min(1,aw/w,ah/h):Math.min(1,aw/w);
-          if(!isFinite(s)||s<=0||s>=0.999)return;if(!forceFit&&s<0.2)s=0.2;
+          var s=Math.min(1,aw/w);
+          if(!isFinite(s)||s<=0||s>=0.999)return;if(s<0.2)s=0.2;
           var sw=Math.max(1,Math.round(w*s));var sh=Math.max(1,Math.round(h*s));
-          if(isPresentation||isThumbnail){
-            frameEl.style.width=sw+'px';frameEl.style.height=sh+'px';frameEl.style.overflow='hidden';
-            try{viewport.style.alignItems=(sh<=ah*0.98)?'center':'flex-start';}catch(e){}
-          }else{
-            frameEl.style.width=sw+'px';frameEl.style.height='';frameEl.style.overflow='';
-            try{viewport.style.alignItems='flex-start';}catch(e){}
-          }
-          scaleEl.style.width=w+'px';scaleEl.style.height='';scaleEl.style.transformOrigin='top center';scaleEl.style.transform='scale('+s+')';
+          frameEl.style.width=sw+'px';frameEl.style.height=sh+'px';frameEl.style.overflow='visible';
+          try{viewport.style.alignItems='flex-start';}catch(e){}
+          scaleEl.style.width=w+'px';scaleEl.style.height=h+'px';scaleEl.style.transformOrigin='top left';scaleEl.style.transform='scale('+s+')';
         }catch(e){}
       }
       var timer=null;function schedule(){try{if(timer)clearTimeout(timer);}catch(e){}timer=setTimeout(function(){timer=null;fit();},60);}
