@@ -229,7 +229,7 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
           var vw=viewport.clientWidth||0;var vh=viewport.clientHeight||0;if(vw<=0||vh<=0)return;
           var padX=0;var padY=0;try{var cs=window.getComputedStyle(viewport);padX=(parseFloat(cs.paddingLeft||'0')||0)+(parseFloat(cs.paddingRight||'0')||0);padY=(parseFloat(cs.paddingTop||'0')||0)+(parseFloat(cs.paddingBottom||'0')||0);}catch(e){}
           var aw=Math.max(0,vw-padX);var ah=Math.max(0,vh-padY);if(aw<=0||ah<=0)return;
-          if(!isThumbnail&&!isPresentation&&!forceFit)return;
+          if(false)return;
           if(isThumbnail){var baseW=1280;var baseH=720;var s0=Math.min(1,aw/baseW,ah/baseH);if(!isFinite(s0)||s0<=0)return;try{contentEl.style.width=baseW+'px';}catch(e){}try{contentEl.style.height=baseH+'px';}catch(e){}try{contentEl.style.overflow='hidden';}catch(e){}scaleEl.style.width=baseW+'px';scaleEl.style.height=baseH+'px';scaleEl.style.transformOrigin='top left';scaleEl.style.transform='scale('+s0+')';frameEl.style.width=Math.max(1,Math.round(baseW*s0))+'px';frameEl.style.height=Math.max(1,Math.round(baseH*s0))+'px';frameEl.style.overflow='hidden';return;}
           var kids=Array.prototype.slice.call(contentEl.children||[]).filter(function(n){try{var tag=(n&&n.tagName)?String(n.tagName).toUpperCase():'';return tag&&tag!=='SCRIPT'&&tag!=='STYLE';}catch(e){return false;}});
           var target=(kids.length===1)?kids[0]:contentEl;var d=dims(target);var w=d.w,h=d.h;if(!w||!h){var d2=dims(contentEl);w=w||d2.w;h=h||d2.h;}
@@ -246,7 +246,7 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
       try{if(document.readyState!=='loading')schedule();else document.addEventListener('DOMContentLoaded',schedule);}catch(e){}
       try{window.addEventListener('load',schedule);}catch(e){}
       try{window.addEventListener('resize',schedule);}catch(e){}
-      try{if(forceFit||isThumbnail){setTimeout(schedule,200);setTimeout(schedule,800);setTimeout(schedule,2000);}}catch(e){}
+      try{setTimeout(schedule,200);setTimeout(schedule,800);setTimeout(schedule,2000);}catch(e){}
       try{var mo=new MutationObserver(function(){schedule();});var root=document.getElementById('__slide_content')||document.body;if(root)mo.observe(root,{childList:true,subtree:true});}catch(e){}
       try{if(typeof ResizeObserver==='function'){var ro=new ResizeObserver(function(){schedule();});var vp=document.getElementById('__slide_viewport');if(vp)ro.observe(vp);if(document.documentElement)ro.observe(document.documentElement);}}catch(e){}
     })();
