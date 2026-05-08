@@ -327,21 +327,6 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
 </body>
 </html>`;
 
-  useEffect(() => {
-    const iframe = typeof ref === 'function' ? null : ref?.current;
-    if (!iframe) return;
-    try {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (iframeDoc) {
-        iframeDoc.open();
-        iframeDoc.write(fullHtml);
-        iframeDoc.close();
-      }
-    } catch {
-      iframe.srcdoc = fullHtml;
-    }
-  });
-
   return (
     <iframe
       ref={ref}
