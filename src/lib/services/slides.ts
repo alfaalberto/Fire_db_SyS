@@ -66,6 +66,21 @@ function mergeSlideDocs(remoteDocs: SlideDoc[], localDocs: SlideDoc[]): SlideDoc
   return Array.from(merged.values());
 }
 
+function syncLocalBackupsInBackground(localDocs: SlideDoc[]): void {
+  for (const doc of localDocs) {
+    void retry(() => (
+      doc.content && doc.content.length > 0
+        ? saveSlideToDB(doc.id, doc.content)
+        : deleteSlideFromDB(doc.id)
+    )).then(() => {
+      clearLocalBackupIfMatches(doc.id, doc.content);
+      cache.delete(CACHE_KEY);
+    }).catch((e) => {
+      console.warn('Unable to sync local slide backup:', doc.id, e);
+    });
+  }
+}
+
 function scheduleFlush(): void {
   if (flushTimer) clearTimeout(flushTimer);
   flushTimer = setTimeout(() => {
@@ -130,6 +145,9 @@ export async function loadAllSlidesCached(): Promise<SlideDoc[]> {
   const cached = cache.get(CACHE_KEY);
   if (cached && cached.expires > now) return cached.value;
   const localBackups = loadLocalBackups();
+  if (localBackups.length > 0) {
+    syncLocalBackupsInBackground(localBackups);
+  }
   let value: SlideDoc[];
   try {
     value = mergeSlideDocs(await retry(() => loadAllSlidesFromDB()), localBackups);

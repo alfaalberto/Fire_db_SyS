@@ -1,4 +1,4 @@
-const CACHE_NAME = 'v1';
+const CACHE_NAME = 'v2';
 const PRECACHE_URLS = [
   '/',
 ];
@@ -23,16 +23,17 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== location.origin) return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request).then((response) => {
-        if (response && response.status === 200 && response.type === 'basic') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      }).catch(() => cached);
-
-      return cached || fetchPromise;
-    })
+    fetch(event.request).then((response) => {
+      if (response && response.status === 200 && response.type === 'basic') {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
+      }
+      return response;
+    }).catch(() => (
+      caches.match(event.request).then((cached) => {
+        if (cached) return cached;
+        return caches.open(CACHE_NAME).then((cache) => cache.match('/'));
+      })
+    ))
   );
 });

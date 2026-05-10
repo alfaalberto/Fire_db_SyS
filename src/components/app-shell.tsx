@@ -12,6 +12,8 @@ import { IndexPanel } from './index-panel';
 import { ViewerPanel } from './viewer-panel';
 import { cn } from '@/lib/utils';
 
+const LOCAL_INDEX_KEY = 'fire-db-sys.index.v1';
+
 function flattenIndex(items: IndexItem[]): IndexItem[] {
   const result: IndexItem[] = [];
   for (const item of items) {
@@ -54,6 +56,20 @@ function updateItemContent(items: IndexItem[], id: string, content: string[] | n
   });
 }
 
+function mergeLoadedContent(items: IndexItem[], docs: Array<{ id: string; content: string[] | null }>): IndexItem[] {
+  return produce(items, (draft) => {
+    for (const doc of docs) {
+      const item = findItemInDraft(draft, doc.id);
+      if (!item) continue;
+      const hasLocalContent = !!item.content && item.content.length > 0;
+      const hasLoadedContent = !!doc.content && doc.content.length > 0;
+      if (!hasLocalContent && hasLoadedContent) {
+        item.content = doc.content;
+      }
+    }
+  });
+}
+
 function findItemInDraft(items: IndexItem[], id: string): IndexItem | null {
   for (const item of items) {
     if (item.id === id) return item;
@@ -63,6 +79,28 @@ function findItemInDraft(items: IndexItem[], id: string): IndexItem | null {
     }
   }
   return null;
+}
+
+function readLocalIndex(): IndexItem[] | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(LOCAL_INDEX_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as IndexItem[];
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (e) {
+    console.warn('[APP] Failed to read local index backup:', e);
+    return null;
+  }
+}
+
+function writeLocalIndex(index: IndexItem[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(LOCAL_INDEX_KEY, JSON.stringify(index));
+  } catch (e) {
+    console.warn('[APP] Failed to write local index backup:', e);
+  }
 }
 
 function collectImportedContent(items: IndexItem[]): Array<{ id: string; content: string[] | null }> {
@@ -97,8 +135,21 @@ export function AppShell() {
   const isMobile = useIsMobile();
   const { toast } = useToast();
   const loadedSlidesRef = useRef<Set<string>>(new Set());
+  const [localIndexReady, setLocalIndexReady] = useState(false);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    const localIndex = readLocalIndex();
+    if (localIndex) {
+      setIndex(localIndex);
+    }
+    setLocalIndexReady(true);
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!localIndexReady) return;
+    writeLocalIndex(index);
+  }, [index, localIndexReady]);
 
   const flat = useMemo(() => flattenIndex(index), [index]);
   const selectedSlide = useMemo(() => (selectedId ? findItemById(index, selectedId) : null), [index, selectedId]);
@@ -124,46 +175,39 @@ export function AppShell() {
   // Bulk-load all slide content from Firestore on mount
   const bulkLoadedRef = useRef(false);
   useEffect(() => {
+    if (!mounted || !localIndexReady) return;
     if (bulkLoadedRef.current) return;
     bulkLoadedRef.current = true;
     setIsLoading(true);
     loadAllSlidesCached()
       .then((docs) => {
-        setIndex((prev) => {
-          let updated = prev;
-          for (const d of docs) {
-            updated = updateItemContent(updated, d.id, d.content);
-            if (d.content && d.content.length > 0) {
-              loadedSlidesRef.current.add(d.id);
-            }
+        setIndex((prev) => mergeLoadedContent(prev, docs));
+        for (const d of docs) {
+          if (d.content && d.content.length > 0) {
+            loadedSlidesRef.current.add(d.id);
           }
-          return updated;
-        });
+        }
       })
       .catch((err) => {
         console.error('[APP] Failed to bulk-load slides:', err);
       })
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [mounted, localIndexReady]);
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
 
-  const handleSave = useCallback(async (id: string, content: string[] | null) => {
+  const handleSave = useCallback((id: string, content: string[] | null) => {
     setIndex((prev) => updateItemContent(prev, id, content));
-    try {
-      if (!content || content.length === 0) {
-        await deleteSlide(id);
-      } else {
-        await saveSlide(id, content);
-      }
-    } catch (err) {
+    const sync = !content || content.length === 0
+      ? deleteSlide(id)
+      : saveSlide(id, content);
+    void sync.catch((err) => {
       console.error('[APP] Failed to save slide:', id, err);
-      toast({ title: "Error al guardar", description: "No se pudo guardar en la base de datos.", variant: "destructive" });
-    }
-  }, [toast]);
+    });
+  }, []);
 
   const handleNavigate = useCallback((slideId: string | null) => {
     if (slideId) setSelectedId(slideId);
@@ -230,6 +274,7 @@ export function AppShell() {
       if (!Array.isArray(parsed)) throw new Error('Formato inválido');
       const importedDocs = collectImportedContent(parsed);
       setIndex(parsed);
+      writeLocalIndex(parsed);
       loadedSlidesRef.current.clear();
       void Promise.all(
         importedDocs.map((doc) => (

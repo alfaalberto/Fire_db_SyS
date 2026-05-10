@@ -328,6 +328,18 @@ export function ViewerPanel({ slide, index, canPresent, onSave, onRelocate, isPr
     if (event.target) event.target.value = '';
   }, [slide, onSave, toast]);
 
+  const handleHtmlContentChange = useCallback((value: string) => {
+    setHtmlContent(value);
+    if (!isEditing || !slide) return;
+    const newContentArray = [...(slide.content || [])];
+    if (newContentArray.length === 0) {
+      newContentArray.push(value);
+    } else {
+      newContentArray[subSlideIndex] = value;
+    }
+    onSave(slide.id, newContentArray);
+  }, [isEditing, slide, subSlideIndex, onSave]);
+
   const insertTag = (tag: string, wrapper = true) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -345,7 +357,7 @@ export function ViewerPanel({ slide, index, canPresent, onSave, onRelocate, isPr
     } else {
       newText = `${before}<${tag} />${after}`;
     }
-    setHtmlContent(newText);
+    handleHtmlContentChange(newText);
     setTimeout(() => textarea.focus(), 0);
   };
 
@@ -435,7 +447,7 @@ export function ViewerPanel({ slide, index, canPresent, onSave, onRelocate, isPr
             </div>
             <div className="flex-1 flex min-h-0">
               <div className={cn("flex flex-col gap-4 p-4 h-full overflow-y-auto", isSplitView ? "w-1/2 border-r" : "w-full")}>
-                <Textarea ref={textareaRef} value={htmlContent} onChange={(e) => setHtmlContent(e.target.value)} placeholder="Pega aquí el código HTML..." className="w-full flex-1 font-code text-sm min-h-[200px]" />
+                <Textarea ref={textareaRef} value={htmlContent} onChange={(e) => handleHtmlContentChange(e.target.value)} placeholder="Pega aquí el código HTML..." className="w-full flex-1 font-code text-sm min-h-[200px]" />
                 <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                   <label className="font-medium text-foreground" htmlFor="ai-user-instructions">Instrucciones para la IA (opcional)</label>
                   <Textarea id="ai-user-instructions" value={aiUserInstructions} onChange={(e) => setAiUserInstructions(e.target.value)} placeholder="Ej: 'usa un estilo visual', 'simplifica el lenguaje pero no quites fórmulas'" className="w-full font-sans text-xs min-h-[60px]" />
