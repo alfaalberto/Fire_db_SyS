@@ -163,7 +163,14 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
   ` : ''}
   <script>
     (function(){
+      var logWindowStart=Date.now();var logBudget=20;
       function send(l,a){
+        if(l==='log'){
+          var now=Date.now();
+          if(now-logWindowStart>2000){logWindowStart=now;logBudget=20;}
+          if(logBudget<=0)return;
+          logBudget-=1;
+        }
         try{parent.postMessage({__slideLog:true,level:l,args:Array.prototype.slice.call(a).map(function(x){try{return x.stack||x.message||String(x)}catch(e){return String(x)}})},"*");}catch(e){}
       }
       var levels=['log','warn','error'];
@@ -241,23 +248,55 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
           scaleEl.style.width=w+'px';scaleEl.style.height=h+'px';scaleEl.style.transformOrigin='top left';scaleEl.style.transform='scale('+s+')';
         }catch(e){}
       }
-      var timer=null;function schedule(){try{if(timer)clearTimeout(timer);}catch(e){}timer=setTimeout(function(){timer=null;fit();},60);}
-      try{if(document.readyState!=='loading')schedule();else document.addEventListener('DOMContentLoaded',schedule);}catch(e){}
+      var raf=0;var timer=null;function run(){raf=0;fit();}
+      function schedule(delay){try{if(timer)clearTimeout(timer);}catch(e){}if(delay&&delay>0){timer=setTimeout(function(){timer=null;schedule();},delay);return;}if(raf)return;raf=(window.requestAnimationFrame||function(cb){return setTimeout(cb,16);})(run);}
+      window.__fitSlideToViewport=fit;
+      window.__scheduleSlideFit=schedule;
+      try{if(document.readyState!=='loading')schedule(60);else document.addEventListener('DOMContentLoaded',function(){schedule(60);});}catch(e){}
       try{window.addEventListener('load',schedule);}catch(e){}
       try{window.addEventListener('resize',schedule);}catch(e){}
-      try{setTimeout(schedule,200);setTimeout(schedule,800);setTimeout(schedule,2000);}catch(e){}
-      try{var mo=new MutationObserver(function(){schedule();});var root=document.getElementById('__slide_content')||document.body;if(root)mo.observe(root,{childList:true,subtree:true});}catch(e){}
-      try{if(typeof ResizeObserver==='function'){var ro=new ResizeObserver(function(){schedule();});var vp=document.getElementById('__slide_viewport');if(vp)ro.observe(vp);if(document.documentElement)ro.observe(document.documentElement);}}catch(e){}
+      try{document.addEventListener('load',function(ev){var t=ev&&ev.target;var tag=t&&t.tagName?String(t.tagName).toUpperCase():'';if(tag==='IMG'||tag==='VIDEO'||tag==='IFRAME')schedule(80);},true);}catch(e){}
+      try{setTimeout(function(){schedule();},200);setTimeout(function(){schedule();},800);setTimeout(function(){schedule();},2000);}catch(e){}
+      try{var mo=new MutationObserver(function(muts){for(var i=0;i<muts.length;i++){if((muts[i].addedNodes&&muts[i].addedNodes.length)||(muts[i].removedNodes&&muts[i].removedNodes.length)){schedule(140);break;}}});var root=document.getElementById('__slide_content')||document.body;if(root)mo.observe(root,{childList:true});setTimeout(function(){try{mo.disconnect();}catch(e){}},5000);}catch(e){}
+      try{if(typeof ResizeObserver==='function'){var ro=new ResizeObserver(function(){schedule(80);});var vp=document.getElementById('__slide_viewport');if(vp)ro.observe(vp);}}catch(e){}
     })();
   </script>
   <script>
     (function(){
       function start(){
         var rendering=false;var scheduled=null;
+        var rendered=false;
         var allowMathJax=false;
         try{allowMathJax=(document.documentElement.getAttribute('data-enable-mathjax')==='true');}catch(e){}
 
         function getAutoRender(){try{return(typeof renderMathInElement==='function')?renderMathInElement:(window&&window['renderMathInElement']);}catch(e){return null;}}
+
+        function nodeMayContainMath(node){
+          try{
+            if(!node)return false;
+            if(node.nodeType===3){
+              var text=node.nodeValue||'';
+              return /\\\(|\\\[|\$\$|<script|math\/tex/i.test(text);
+            }
+            if(node.nodeType!==1)return false;
+            var el=node;var tag=(el.tagName||'').toUpperCase();
+            if(tag==='SCRIPT'){return /math\/tex/i.test(el.getAttribute('type')||'');}
+            if(tag==='STYLE'||tag==='NOSCRIPT'||tag==='TEXTAREA'||tag==='PRE'||tag==='CODE'||tag==='CANVAS'||tag==='SVG')return false;
+            if(el.classList&&(el.classList.contains('katex')||el.classList.contains('MathJax')))return false;
+            var textContent=el.textContent||'';if(textContent.length>5000)textContent=textContent.slice(0,5000);
+            return /\\\(|\\\[|\$\$/.test(textContent);
+          }catch(e){return false;}
+        }
+
+        function mutationsMayContainMath(muts){
+          try{
+            for(var i=0;i<muts.length;i++){
+              var nodes=muts[i].addedNodes||[];
+              for(var j=0;j<nodes.length&&j<20;j++){if(nodeMayContainMath(nodes[j]))return true;}
+            }
+          }catch(e){}
+          return false;
+        }
 
         function normalizeDoubleEscapedDelimiters(root){
           try{
@@ -267,12 +306,13 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
           }catch(e){}
         }
 
-        function renderAll(){
-          if(rendering)return;rendering=true;
+        function renderAll(force){
+          if(rendering||rendered&&!force)return;rendering=true;
           try{
             var body=document.getElementById('__slide_content')||document.body;
             normalizeDoubleEscapedDelimiters(body);
             var autoRender=getAutoRender();
+            var didWork=false;
             if(autoRender){
               try{
                 autoRender(body,{
@@ -280,21 +320,24 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
                   throwOnError:false,strict:'ignore',trust:true,
                   macros:{'\\\\R':'\\\\mathbb{R}','\\\\N':'\\\\mathbb{N}','\\\\Z':'\\\\mathbb{Z}','\\\\C':'\\\\mathbb{C}','\\\\F':'\\\\mathcal{F}','\\\\Laplace':'\\\\mathcal{L}','\\\\fourier':'\\\\mathfrak{F}','\\\\Re':'\\\\operatorname{Re}','\\\\Im':'\\\\operatorname{Im}'}
                 });
+                didWork=true;
               }catch(e){try{console.warn('[SLIDE] KaTeX autoRender error',e);}catch(e2){}}
             }
-            if(allowMathJax&&window.MathJax&&window.MathJax.typesetPromise){try{window.MathJax.typesetPromise([body]).catch(function(e){try{console.warn('[SLIDE] MathJax typeset error',e);}catch(e2){}});}catch(e){}}
-            try{if(window.__fitSlideToViewport)window.__fitSlideToViewport();}catch(e){}
+            if(allowMathJax&&window.MathJax&&window.MathJax.typesetPromise){try{didWork=true;window.MathJax.typesetPromise([body]).catch(function(e){try{console.warn('[SLIDE] MathJax typeset error',e);}catch(e2){}});}catch(e){}}
+            if(didWork)rendered=true;
+            try{if(window.__scheduleSlideFit)window.__scheduleSlideFit(80);else if(window.__fitSlideToViewport)window.__fitSlideToViewport();}catch(e){}
           }catch(e){}
           rendering=false;
         }
 
-        function scheduleRender(){if(scheduled)clearTimeout(scheduled);scheduled=setTimeout(function(){scheduled=null;renderAll();},120);}
+        function scheduleRender(delay,force){if(scheduled)clearTimeout(scheduled);scheduled=setTimeout(function(){scheduled=null;renderAll(!!force);},delay||120);}
+        window.__renderSlideMath=function(){scheduleRender(80,true);};
 
-        if(document.readyState==='complete'||document.readyState==='interactive'){scheduleRender();setTimeout(scheduleRender,500);setTimeout(scheduleRender,1500);}
-        else{document.addEventListener('DOMContentLoaded',function(){scheduleRender();setTimeout(scheduleRender,500);setTimeout(scheduleRender,1500);});}
-        window.addEventListener('load',function(){scheduleRender();setTimeout(scheduleRender,300);});
+        if(document.readyState==='complete'||document.readyState==='interactive'){scheduleRender(120,false);setTimeout(function(){scheduleRender(0,false);},600);setTimeout(function(){scheduleRender(0,false);},1600);}
+        else{document.addEventListener('DOMContentLoaded',function(){scheduleRender(120,false);setTimeout(function(){scheduleRender(0,false);},600);setTimeout(function(){scheduleRender(0,false);},1600);});}
+        window.addEventListener('load',function(){scheduleRender(120,false);});
 
-        try{var mo2=new MutationObserver(function(){scheduleRender();});var root2=document.getElementById('__slide_content')||document.body;if(root2)mo2.observe(root2,{childList:true,subtree:true});}catch(e){}
+        try{var mo2=new MutationObserver(function(muts){if(!rendering&&mutationsMayContainMath(muts))scheduleRender(180,true);});var root2=document.getElementById('__slide_content')||document.body;if(root2)mo2.observe(root2,{childList:true,subtree:true});}catch(e){}
       }
       if(document.readyState==='complete'||document.readyState==='interactive')setTimeout(start,0);else document.addEventListener('DOMContentLoaded',start);
     })();
