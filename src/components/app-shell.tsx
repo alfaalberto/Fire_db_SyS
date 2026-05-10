@@ -65,6 +65,28 @@ function findItemInDraft(items: IndexItem[], id: string): IndexItem | null {
   return null;
 }
 
+function collectImportedContent(items: IndexItem[]): Array<{ id: string; content: string[] | null }> {
+  const docs: Array<{ id: string; content: string[] | null }> = [];
+  for (const item of items) {
+    if (Object.prototype.hasOwnProperty.call(item, 'content')) {
+      docs.push({
+        id: item.id,
+        content: item.content && item.content.length > 0 ? item.content : null,
+      });
+    }
+    if (item.children && item.children.length > 0) {
+      docs.push(...collectImportedContent(item.children));
+    }
+  }
+  return docs;
+}
+
+function ignorePermissionError(action: () => Promise<unknown> | void): void {
+  try {
+    void Promise.resolve(action()).catch(() => {});
+  } catch {}
+}
+
 export function AppShell() {
   const [mounted, setMounted] = useState(false);
   const [index, setIndex] = useState<IndexItem[]>(INDEX);
@@ -110,8 +132,8 @@ export function AppShell() {
         setIndex((prev) => {
           let updated = prev;
           for (const d of docs) {
+            updated = updateItemContent(updated, d.id, d.content);
             if (d.content && d.content.length > 0) {
-              updated = updateItemContent(updated, d.id, d.content);
               loadedSlidesRef.current.add(d.id);
             }
           }
@@ -156,10 +178,12 @@ export function AppShell() {
       const next = !prev;
       if (next) {
         document.documentElement.classList.add('presentation-mode');
-        try { document.documentElement.requestFullscreen?.(); } catch {}
+        ignorePermissionError(() => document.documentElement.requestFullscreen?.());
       } else {
         document.documentElement.classList.remove('presentation-mode');
-        try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch {}
+        ignorePermissionError(() => {
+          if (document.fullscreenElement) return document.exitFullscreen?.();
+        });
       }
       return next;
     });
@@ -204,9 +228,26 @@ export function AppShell() {
     try {
       const parsed = JSON.parse(data) as IndexItem[];
       if (!Array.isArray(parsed)) throw new Error('Formato inválido');
+      const importedDocs = collectImportedContent(parsed);
       setIndex(parsed);
       loadedSlidesRef.current.clear();
-      toast({ title: "Backup importado con éxito." });
+      void Promise.all(
+        importedDocs.map((doc) => (
+          doc.content && doc.content.length > 0
+            ? saveSlide(doc.id, doc.content)
+            : deleteSlide(doc.id)
+        ))
+      ).then(() => {
+        toast({ title: "Backup sincronizado con la base de datos." });
+      }).catch((err) => {
+        console.error('[APP] Failed to sync imported backup:', err);
+        toast({
+          title: "Backup importado localmente",
+          description: "No se pudo sincronizar todo con Firestore. El respaldo local se conservará.",
+          variant: "destructive",
+        });
+      });
+      toast({ title: "Backup importado con éxito.", description: "Sincronizando cambios..." });
     } catch (err) {
       toast({ title: "Error al importar", description: "El archivo no tiene un formato válido.", variant: "destructive" });
     }

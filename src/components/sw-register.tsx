@@ -12,11 +12,13 @@ export function SwRegister() {
       if ('caches' in window) {
         caches.keys().then((names) => {
           const currentVersion = 'v1';
-          names.forEach((name) => {
-            if (name !== currentVersion) {
-              caches.delete(name);
-            }
-          });
+          return Promise.all(
+            names
+              .filter((name) => name !== currentVersion)
+              .map((name) => caches.delete(name))
+          );
+        }).catch((err) => {
+          console.warn('Cache cleanup failed:', err);
         });
       }
     }
