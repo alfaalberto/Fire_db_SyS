@@ -178,3 +178,11 @@ export async function deleteSlide(id: string): Promise<void> {
   clearLocalBackupIfMatches(id, null);
   cache.delete(CACHE_KEY);
 }
+
+export async function forceFlushAll(): Promise<void> {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  await runSaveWorker();
+}

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { produce } from 'immer';
 import type { IndexItem } from '@/lib/types';
 import { INDEX } from '@/lib/constants';
-import { saveSlide, deleteSlide, loadAllSlidesCached } from '@/lib/services/slides';
+import { saveSlide, deleteSlide, loadAllSlidesCached, forceFlushAll } from '@/lib/services/slides';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
 import { AppProvider } from './app-context';
@@ -298,6 +298,38 @@ export function AppShell() {
     }
   }, [toast]);
 
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSaveAll = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      // 1. Save index to localStorage
+      writeLocalIndex(index);
+
+      // 2. Collect all slides with content and queue saves
+      const allDocs = collectImportedContent(index);
+      for (const doc of allDocs) {
+        if (doc.content && doc.content.length > 0) {
+          void saveSlide(doc.id, doc.content);
+        }
+      }
+
+      // 3. Force flush all pending writes to Firestore
+      await forceFlushAll();
+
+      toast({ title: "Guardado completo", description: "Todos los cambios se guardaron en Firebase y localmente." });
+    } catch (err) {
+      console.error('[APP] Error saving all:', err);
+      toast({
+        title: "Error al guardar",
+        description: "Se guardó localmente pero hubo un problema con Firebase. Los cambios se sincronizarán después.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [index, toast]);
+
   const appContextValue = useMemo(() => ({ togglePresentationMode }), [togglePresentationMode]);
 
   if (!mounted) {
@@ -345,6 +377,8 @@ export function AppShell() {
             onSelect={handleSelect}
             onExport={handleExport}
             onImport={handleImport}
+            onSaveAll={handleSaveAll}
+            isSaving={isSaving}
           />
         </div>
 

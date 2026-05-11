@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Search, Download, Upload, Moon, Sun, X } from 'lucide-react';
+import { Search, Download, Upload, Save, Moon, Sun, X } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import type { IndexItem } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -15,9 +15,11 @@ interface IndexPanelProps {
   onSelect: (id: string) => void;
   onExport: () => void;
   onImport: (data: string) => void;
+  onSaveAll: () => void;
+  isSaving?: boolean;
 }
 
-export function IndexPanel({ index, selectedId, onSelect, onExport, onImport }: IndexPanelProps) {
+export function IndexPanel({ index, selectedId, onSelect, onExport, onImport, onSaveAll, isSaving = false }: IndexPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [mounted, setMounted] = useState(false);
   const { theme, setTheme } = useTheme();
@@ -100,6 +102,9 @@ export function IndexPanel({ index, selectedId, onSelect, onExport, onImport }: 
       {/* Footer actions */}
       <div className="p-2 border-t border-sidebar-border shrink-0 flex items-center justify-center gap-2">
         <input type="file" ref={fileInputRef} onChange={handleImportFile} accept=".json" className="hidden" />
+        <Button variant="default" size="sm" className="text-xs h-7 bg-green-600 hover:bg-green-500 text-white" onClick={onSaveAll} disabled={isSaving}>
+          <Save size={12} /> {isSaving ? 'Guardando...' : 'Guardar'}
+        </Button>
         <Button variant="ghost" size="sm" className="text-xs h-7" onClick={onExport}>
           <Download size={12} /> Exportar
         </Button>
