@@ -4,8 +4,18 @@ runConfig:
   concurrency: 80
 
 env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyAMDFm8XgH5YyK-4FWu8ohq26BnELij1tY
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: senalesysistemas-266a1.firebaseapp.com
   - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
     value: senalesysistemas-266a1
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: senalesysistemas-266a1.firebasestorage.app
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "305300859054"
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:305300859054:web:f2caf7bc6620d59ee2e53f"
   - variable: NEXT_PUBLIC_TRUST_SLIDES
     value: "true"
   - variable: NEXT_PUBLIC_ENABLE_MATHJAX
