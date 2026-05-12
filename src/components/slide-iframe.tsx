@@ -222,6 +222,12 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
     html[data-self-scaling="true"] #__slide_scale,
     html[data-self-scaling="true"] #__slide_content { display:contents!important; }
     html[data-self-scaling="true"] #__slide_content { padding:0!important; }
+    html[data-self-scaling="true"] body {
+      background-color:transparent!important;
+      color:inherit!important;
+      font-family:inherit!important;
+      line-height:inherit!important;
+    }
   </style>
   ${headHtml}
   ${!bodyAttrs ? '<style>html:not([data-self-scaling]) #__slide_content { padding: 1.5rem; }</style>' : ''}
