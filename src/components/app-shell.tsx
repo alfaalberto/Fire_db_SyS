@@ -5,6 +5,7 @@ import { produce } from 'immer';
 import type { IndexItem } from '@/lib/types';
 import { INDEX } from '@/lib/constants';
 import { saveSlide, deleteSlide, loadAllSlidesCached, forceFlushAll } from '@/lib/services/slides';
+import { saveFullIndexToDB, loadFullIndexFromDB } from '@/lib/db';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
 import { AppProvider } from './app-context';
@@ -172,31 +173,47 @@ export function AppShell() {
 
   const canPresent = flat.length > 0;
 
-  // Bulk-load all slide content from Firestore on mount
+  // Load slides from Firestore on mount — try full index first, then individual slides
   const bulkLoadedRef = useRef(false);
   useEffect(() => {
     if (!mounted || !localIndexReady) return;
     if (bulkLoadedRef.current) return;
     bulkLoadedRef.current = true;
     setIsLoading(true);
-    loadAllSlidesCached()
-      .then((docs) => {
+
+    (async () => {
+      // Strategy 1: Try to load the complete index from Firestore (fastest, most reliable)
+      try {
+        const fullIndex = await loadFullIndexFromDB();
+        if (fullIndex && Array.isArray(fullIndex) && fullIndex.length > 0) {
+          console.log('[APP] Full index loaded from Firestore:', fullIndex.length, 'items');
+          setIndex(fullIndex as IndexItem[]);
+          writeLocalIndex(fullIndex as IndexItem[]);
+          return;
+        }
+      } catch (err) {
+        console.warn('[APP] Could not load full index from Firestore, trying individual slides:', err);
+      }
+
+      // Strategy 2: Fall back to loading individual slide docs and merging with default/local index
+      try {
+        const docs = await loadAllSlidesCached();
+        console.log('[APP] Loaded', docs.length, 'individual slide docs from Firestore');
         setIndex((prev) => mergeLoadedContent(prev, docs));
         for (const d of docs) {
           if (d.content && d.content.length > 0) {
             loadedSlidesRef.current.add(d.id);
           }
         }
-      })
-      .catch((err) => {
-        console.error('[APP] Failed to bulk-load slides:', err);
+      } catch (err) {
+        console.error('[APP] Failed to load slides from Firestore:', err);
         toast({
           title: "Error al cargar diapositivas",
-          description: "No se pudieron cargar las diapositivas desde la base de datos. Verifica tu conexión a internet.",
+          description: "No se pudieron cargar desde la base de datos. Verifica tu conexión a internet e intenta recargar.",
           variant: "destructive",
         });
-      })
-      .finally(() => setIsLoading(false));
+      }
+    })().finally(() => setIsLoading(false));
   }, [mounted, localIndexReady, toast]);
 
   const handleSelect = useCallback((id: string) => {
@@ -311,7 +328,10 @@ export function AppShell() {
       // 1. Save index to localStorage
       writeLocalIndex(index);
 
-      // 2. Collect all slides with content and queue saves
+      // 2. Save the FULL index (with content) to Firestore for cross-device sync
+      await saveFullIndexToDB(index);
+
+      // 3. Also save individual slides for backward compatibility
       const allDocs = collectImportedContent(index);
       for (const doc of allDocs) {
         if (doc.content && doc.content.length > 0) {
@@ -319,10 +339,10 @@ export function AppShell() {
         }
       }
 
-      // 3. Force flush all pending writes to Firestore
+      // 4. Force flush all pending writes to Firestore
       await forceFlushAll();
 
-      toast({ title: "Guardado completo", description: "Todos los cambios se guardaron en Firebase y localmente." });
+      toast({ title: "Guardado completo", description: "Todos los cambios se guardaron en Firebase. Estarán disponibles en todos tus dispositivos." });
     } catch (err) {
       console.error('[APP] Error saving all:', err);
       toast({
