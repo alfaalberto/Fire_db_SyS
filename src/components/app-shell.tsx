@@ -190,9 +190,14 @@ export function AppShell() {
       })
       .catch((err) => {
         console.error('[APP] Failed to bulk-load slides:', err);
+        toast({
+          title: "Error al cargar diapositivas",
+          description: "No se pudieron cargar las diapositivas desde la base de datos. Verifica tu conexión a internet.",
+          variant: "destructive",
+        });
       })
       .finally(() => setIsLoading(false));
-  }, [mounted, localIndexReady]);
+  }, [mounted, localIndexReady, toast]);
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
