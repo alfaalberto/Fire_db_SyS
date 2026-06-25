@@ -1,11 +1,87 @@
 rules_version = '2';
 
+// NOTE ON SECURITY
+// ----------------
+// This app currently has NO authentication, so reads/writes/deletes are open.
+// These rules harden the open model by (1) restricting access to the known
+// collections only, (2) validating document shape, and (3) capping string
+// sizes to prevent abuse / oversized writes.
+//
+// RECOMMENDED next step: add Firebase Auth and replace `if true` below with
+// `if request.auth != null` (or an allow-list of admin UIDs). A ready-to-use
+// authenticated version is provided in comments at the bottom of this file.
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow read/write access to authenticated users
-    match /{document=**} {
+
+    // Max characters allowed for a serialized string field. Each chunk is kept
+    // well under Firestore's 1 MiB document limit by the client (~900 KB bytes).
+    function maxStr() { return 1500000; }
+
+    function isChunk(data) {
+      return data.keys().hasOnly(['index', 'data'])
+        && data.index is int
+        && data.data is string
+        && data.data.size() < maxStr();
+    }
+
+    function isSlide(data) {
+      return data.keys().hasOnly(['id', 'content', 'contentChunked', 'contentChunkCount'])
+        && data.id is string
+        && data.id.size() < 512
+        && (data.content == null || data.content is list);
+    }
+
+    function isMeta(data) {
+      return data.keys().hasOnly(['data', 'chunked', 'chunkCount', 'updatedAt'])
+        && (data.data == null || (data.data is string && data.data.size() < maxStr()));
+    }
+
+    // --- Slides ---
+    match /slides/{slideId} {
       allow read: if true;
-      allow write: if true;
+      allow create, update: if isSlide(request.resource.data);
+      allow delete: if true;
+
+      match /contentChunks/{chunkId} {
+        allow read: if true;
+        allow create, update: if isChunk(request.resource.data);
+        allow delete: if true;
+      }
+    }
+
+    // --- Full index (cross-device sync) ---
+    match /meta/{docId} {
+      allow read: if true;
+      allow create, update: if isMeta(request.resource.data);
+      allow delete: if true;
+
+      match /indexChunks/{chunkId} {
+        allow read: if true;
+        allow create, update: if isChunk(request.resource.data);
+        allow delete: if true;
+      }
+    }
+
+    // Deny everything else by default.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// RECOMMENDED AUTHENTICATED VERSION (enable after adding Firebase Auth):
+//
+// service cloud.firestore {
+//   match /databases/{database}/documents {
+//     match /{document=**} {
+//       allow read: if request.auth != null;
+//       allow write: if request.auth != null;
+//       // Or restrict writes to specific admins:
+//       // allow write: if request.auth != null
+//       //   && request.auth.uid in ['YOUR_ADMIN_UID'];
+//     }
+//   }
+// }
+// ---------------------------------------------------------------------------

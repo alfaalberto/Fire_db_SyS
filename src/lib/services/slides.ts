@@ -67,18 +67,24 @@ function mergeSlideDocs(remoteDocs: SlideDoc[], localDocs: SlideDoc[]): SlideDoc
 }
 
 function syncLocalBackupsInBackground(localDocs: SlideDoc[]): void {
-  for (const doc of localDocs) {
-    void retry(() => (
-      doc.content && doc.content.length > 0
-        ? saveSlideToDB(doc.id, doc.content)
-        : deleteSlideFromDB(doc.id)
-    )).then(() => {
-      clearLocalBackupIfMatches(doc.id, doc.content);
-      cache.delete(CACHE_KEY);
-    }).catch((e) => {
-      console.warn('Unable to sync local slide backup:', doc.id, e);
-    });
-  }
+  // Process sequentially (one at a time) instead of firing every write in
+  // parallel, which would flood Firestore's write stream and trigger
+  // "resource-exhausted: Write stream exhausted maximum allowed queued writes."
+  void (async () => {
+    for (const doc of localDocs) {
+      try {
+        await retry(() => (
+          doc.content && doc.content.length > 0
+            ? saveSlideToDB(doc.id, doc.content)
+            : deleteSlideFromDB(doc.id)
+        ));
+        clearLocalBackupIfMatches(doc.id, doc.content);
+        cache.delete(CACHE_KEY);
+      } catch (e) {
+        console.warn('Unable to sync local slide backup:', doc.id, e);
+      }
+    }
+  })();
 }
 
 function scheduleFlush(): void {

@@ -20,8 +20,8 @@ export const metadata: Metadata = {
   description: "Plataforma interactiva para el curso de Señales y Sistemas basada en Oppenheim, Willsky y Nawab.",
   manifest: "/manifest.json",
   icons: {
-    icon: "/icons/icon-192.png",
-    apple: "/icons/icon-512.png",
+    icon: "/icons/icon-192.svg",
+    apple: "/icons/icon-512.svg",
   },
 };
 

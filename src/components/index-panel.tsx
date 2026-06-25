@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Search, Download, Upload, Save, Moon, Sun, X } from 'lucide-react';
+import { Search, Download, Upload, Save, Moon, Sun, X, Plus, ListOrdered } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import type { IndexItem } from '@/lib/types';
+import type { DropPosition } from '@/lib/tree';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
@@ -17,9 +18,29 @@ interface IndexPanelProps {
   onImport: (data: string) => void;
   onSaveAll: () => void;
   isSaving?: boolean;
+  isDirty?: boolean;
+  onRename: (id: string, title: string) => void;
+  onDelete: (id: string) => void;
+  onAddItem: (parentId: string | null) => void;
+  onMove: (sourceId: string, targetId: string, position: DropPosition) => void;
+  onRenumber: () => void;
 }
 
-export function IndexPanel({ index, selectedId, onSelect, onExport, onImport, onSaveAll, isSaving = false }: IndexPanelProps) {
+export function IndexPanel({
+  index,
+  selectedId,
+  onSelect,
+  onExport,
+  onImport,
+  onSaveAll,
+  isSaving = false,
+  isDirty = false,
+  onRename,
+  onDelete,
+  onAddItem,
+  onMove,
+  onRenumber,
+}: IndexPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [mounted, setMounted] = useState(false);
   const { theme, setTheme } = useTheme();
@@ -36,7 +57,6 @@ export function IndexPanel({ index, selectedId, onSelect, onExport, onImport, on
       const data = ev.target?.result as string;
       try {
         onImport(data);
-        toast({ title: "Backup importado con éxito." });
       } catch {
         toast({ title: "Error al importar.", variant: "destructive" });
       }
@@ -50,10 +70,25 @@ export function IndexPanel({ index, selectedId, onSelect, onExport, onImport, on
       {/* Header */}
       <div className="p-3 border-b border-sidebar-border shrink-0">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-bold tracking-tight text-primary">
+          <h2 className="text-sm font-bold tracking-tight text-primary flex items-center gap-1.5">
             Señales y Sistemas
+            {isDirty && (
+              <span
+                title="Cambios sin guardar"
+                className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400"
+              />
+            )}
           </h2>
           <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={onRenumber}
+              title="Renumerar secciones según su orden"
+            >
+              <ListOrdered size={14} />
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -70,7 +105,7 @@ export function IndexPanel({ index, selectedId, onSelect, onExport, onImport, on
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar tema..."
+            placeholder="Buscar tema o contenido..."
             className="h-8 pl-8 pr-8 text-xs bg-sidebar-accent/50 border-sidebar-border"
           />
           {searchQuery && (
@@ -95,15 +130,26 @@ export function IndexPanel({ index, selectedId, onSelect, onExport, onImport, on
             selectedId={selectedId}
             onSelect={onSelect}
             searchQuery={searchQuery}
+            onRename={onRename}
+            onDelete={onDelete}
+            onAddItem={onAddItem}
+            onMove={onMove}
           />
         ))}
+        <button
+          type="button"
+          onClick={() => onAddItem(null)}
+          className="w-full mt-1 px-3 py-1.5 text-xs rounded-md flex items-center gap-1.5 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+        >
+          <Plus size={13} className="shrink-0" /> Añadir sección
+        </button>
       </div>
 
       {/* Footer actions */}
       <div className="p-2 border-t border-sidebar-border shrink-0 flex items-center justify-center gap-2">
         <input type="file" ref={fileInputRef} onChange={handleImportFile} accept=".json" className="hidden" />
         <Button variant="default" size="sm" className="text-xs h-7 bg-green-600 hover:bg-green-500 text-white" onClick={onSaveAll} disabled={isSaving}>
-          <Save size={12} /> {isSaving ? 'Guardando...' : 'Guardar'}
+          <Save size={12} /> {isSaving ? 'Guardando...' : isDirty ? 'Guardar *' : 'Guardar'}
         </Button>
         <Button variant="ghost" size="sm" className="text-xs h-7" onClick={onExport}>
           <Download size={12} /> Exportar

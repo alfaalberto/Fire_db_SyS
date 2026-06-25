@@ -1,11 +1,27 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { produce } from 'immer';
 import type { IndexItem } from '@/lib/types';
 import { INDEX } from '@/lib/constants';
 import { saveSlide, deleteSlide, loadAllSlidesCached, forceFlushAll } from '@/lib/services/slides';
-import { saveFullIndexToDB, loadFullIndexFromDB } from '@/lib/db';
+import { saveFullIndexToDB, loadFullIndexFromDB, subscribeFullIndex } from '@/lib/db';
+import {
+  flattenIndex,
+  findItemById,
+  getBreadcrumbs,
+  updateItemContent,
+  mergeLoadedContent,
+  collectAllIds,
+  collectContentIds,
+  generateUniqueId,
+  renameItem,
+  deleteItem,
+  addChildItem,
+  moveItem,
+  renumberIndex,
+  serializeIndex,
+  type DropPosition,
+} from '@/lib/tree';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
 import { AppProvider } from './app-context';
@@ -14,73 +30,6 @@ import { ViewerPanel } from './viewer-panel';
 import { cn } from '@/lib/utils';
 
 const LOCAL_INDEX_KEY = 'fire-db-sys.index.v1';
-
-function flattenIndex(items: IndexItem[]): IndexItem[] {
-  const result: IndexItem[] = [];
-  for (const item of items) {
-    result.push(item);
-    if (item.children && item.children.length > 0) {
-      result.push(...flattenIndex(item.children));
-    }
-  }
-  return result;
-}
-
-function findItemById(items: IndexItem[], id: string): IndexItem | null {
-  for (const item of items) {
-    if (item.id === id) return item;
-    if (item.children) {
-      const found = findItemById(item.children, id);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function getBreadcrumbs(items: IndexItem[], targetId: string, path: IndexItem[] = []): IndexItem[] {
-  for (const item of items) {
-    if (item.id === targetId) return [...path, item];
-    if (item.children) {
-      const result = getBreadcrumbs(item.children, targetId, [...path, item]);
-      if (result.length > 0) return result;
-    }
-  }
-  return [];
-}
-
-function updateItemContent(items: IndexItem[], id: string, content: string[] | null): IndexItem[] {
-  return produce(items, (draft) => {
-    const item = findItemInDraft(draft, id);
-    if (item) {
-      item.content = content && content.length > 0 ? content : undefined;
-    }
-  });
-}
-
-function mergeLoadedContent(items: IndexItem[], docs: Array<{ id: string; content: string[] | null }>): IndexItem[] {
-  return produce(items, (draft) => {
-    for (const doc of docs) {
-      const item = findItemInDraft(draft, doc.id);
-      if (!item) continue;
-      const hasLocalContent = !!item.content && item.content.length > 0;
-      const hasLoadedContent = !!doc.content && doc.content.length > 0;
-      if (!hasLocalContent && hasLoadedContent) {
-        item.content = doc.content;
-      }
-    }
-  });
-}
-
-function findItemInDraft(items: IndexItem[], id: string): IndexItem | null {
-  for (const item of items) {
-    if (item.id === id) return item;
-    if (item.children) {
-      const found = findItemInDraft(item.children, id);
-      if (found) return found;
-    }
-  }
-  return null;
-}
 
 function readLocalIndex(): IndexItem[] | null {
   if (typeof window === 'undefined') return null;
@@ -104,22 +53,6 @@ function writeLocalIndex(index: IndexItem[]): void {
   }
 }
 
-function collectImportedContent(items: IndexItem[]): Array<{ id: string; content: string[] | null }> {
-  const docs: Array<{ id: string; content: string[] | null }> = [];
-  for (const item of items) {
-    if (Object.prototype.hasOwnProperty.call(item, 'content')) {
-      docs.push({
-        id: item.id,
-        content: item.content && item.content.length > 0 ? item.content : null,
-      });
-    }
-    if (item.children && item.children.length > 0) {
-      docs.push(...collectImportedContent(item.children));
-    }
-  }
-  return docs;
-}
-
 function ignorePermissionError(action: () => Promise<unknown> | void): void {
   try {
     void Promise.resolve(action()).catch(() => {});
@@ -137,6 +70,19 @@ export function AppShell() {
   const { toast } = useToast();
   const loadedSlidesRef = useRef<Set<string>>(new Set());
   const [localIndexReady, setLocalIndexReady] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const dirtyRef = useRef(false);
+  const lastServerSerializedRef = useRef<string | null>(null);
+
+  const markDirty = useCallback(() => {
+    dirtyRef.current = true;
+    setIsDirty(true);
+  }, []);
+
+  const clearDirty = useCallback(() => {
+    dirtyRef.current = false;
+    setIsDirty(false);
+  }, []);
 
   useEffect(() => {
     const localIndex = readLocalIndex();
@@ -145,6 +91,17 @@ export function AppShell() {
     }
     setLocalIndexReady(true);
     setMounted(true);
+  }, []);
+
+  // Warn before leaving with unsaved changes.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
   useEffect(() => {
@@ -216,6 +173,28 @@ export function AppShell() {
     })().finally(() => setIsLoading(false));
   }, [mounted, localIndexReady, toast]);
 
+  // Real-time cross-device sync: apply remote full-index updates, but never
+  // clobber unsaved local edits (guarded by dirtyRef).
+  useEffect(() => {
+    if (!mounted || !localIndexReady) return;
+    const unsub = subscribeFullIndex(
+      (remote) => {
+        if (!remote || !Array.isArray(remote) || remote.length === 0) return;
+        if (dirtyRef.current) return;
+        const serialized = serializeIndex(remote as IndexItem[]);
+        if (serialized === lastServerSerializedRef.current) return;
+        lastServerSerializedRef.current = serialized;
+        setIndex((prev) => {
+          if (serializeIndex(prev) === serialized) return prev;
+          writeLocalIndex(remote as IndexItem[]);
+          return remote as IndexItem[];
+        });
+      },
+      (err) => console.warn('[APP] Realtime index sync error:', err)
+    );
+    return () => unsub();
+  }, [mounted, localIndexReady]);
+
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
     if (isMobile) setSidebarOpen(false);
@@ -223,21 +202,78 @@ export function AppShell() {
 
   const handleSave = useCallback((id: string, content: string[] | null) => {
     setIndex((prev) => updateItemContent(prev, id, content));
+    markDirty();
     const sync = !content || content.length === 0
       ? deleteSlide(id)
       : saveSlide(id, content);
     void sync.catch((err) => {
       console.error('[APP] Failed to save slide:', id, err);
     });
-  }, []);
+  }, [markDirty]);
 
   const handleNavigate = useCallback((slideId: string | null) => {
     if (slideId) setSelectedId(slideId);
   }, []);
 
-  const handleRelocate = useCallback((slideId: string) => {
-    toast({ title: "Función de reubicación", description: "Próximamente disponible." });
-  }, [toast]);
+  const handleRename = useCallback((id: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setIndex((prev) => renameItem(prev, id, trimmed));
+    markDirty();
+  }, [markDirty]);
+
+  const handleAddItem = useCallback((parentId: string | null) => {
+    markDirty();
+    setIndex((prev) => {
+      const newItem: IndexItem = {
+        id: generateUniqueId(prev, 'Nueva subseccion'),
+        title: 'Nueva subsección',
+      };
+      const next = addChildItem(prev, parentId, newItem);
+      setSelectedId(newItem.id);
+      return next;
+    });
+  }, []);
+
+  const handleDeleteItem = useCallback((id: string) => {
+    const target = findItemById(index, id);
+    if (!target) return;
+    const contentIds = collectContentIds([target]);
+    setIndex((prev) => deleteItem(prev, id));
+    markDirty();
+    setSelectedId((prevSelected) => {
+      if (!prevSelected) return prevSelected;
+      const deletedIds = new Set(collectAllIds([target]));
+      return deletedIds.has(prevSelected) ? null : prevSelected;
+    });
+    for (const cid of contentIds) {
+      loadedSlidesRef.current.delete(cid);
+      void deleteSlide(cid).catch((err) => console.error('[APP] Failed to delete slide content:', cid, err));
+    }
+    toast({ title: "Subsección eliminada." });
+  }, [index, toast, markDirty]);
+
+  const handleMove = useCallback((sourceId: string, targetId: string, position: DropPosition) => {
+    setIndex((prev) => {
+      const next = moveItem(prev, sourceId, targetId, position);
+      if (next === prev) return prev;
+      markDirty();
+      return next;
+    });
+  }, [markDirty]);
+
+  const handleRenumber = useCallback(() => {
+    setIndex((prev) => {
+      const next = renumberIndex(prev);
+      if (serializeIndex(next) === serializeIndex(prev)) {
+        toast({ title: "La numeración ya está actualizada." });
+        return prev;
+      }
+      markDirty();
+      toast({ title: "Secciones renumeradas." });
+      return next;
+    });
+  }, [markDirty, toast]);
 
   const togglePresentationMode = useCallback(() => {
     setIsPresentationMode((prev) => {
@@ -294,17 +330,15 @@ export function AppShell() {
     try {
       const parsed = JSON.parse(data) as IndexItem[];
       if (!Array.isArray(parsed)) throw new Error('Formato inválido');
-      const importedDocs = collectImportedContent(parsed);
       setIndex(parsed);
       writeLocalIndex(parsed);
       loadedSlidesRef.current.clear();
-      void Promise.all(
-        importedDocs.map((doc) => (
-          doc.content && doc.content.length > 0
-            ? saveSlide(doc.id, doc.content)
-            : deleteSlide(doc.id)
-        ))
-      ).then(() => {
+      markDirty();
+      // Persist the imported tree as the authoritative full index instead of
+      // firing one write per slide in parallel (which floods Firestore's write
+      // stream and triggers "resource-exhausted").
+      void saveFullIndexToDB(parsed).then(() => {
+        clearDirty();
         toast({ title: "Backup sincronizado con la base de datos." });
       }).catch((err) => {
         console.error('[APP] Failed to sync imported backup:', err);
@@ -318,7 +352,7 @@ export function AppShell() {
     } catch (err) {
       toast({ title: "Error al importar", description: "El archivo no tiene un formato válido.", variant: "destructive" });
     }
-  }, [toast]);
+  }, [toast, markDirty, clearDirty]);
 
   const [isSaving, setIsSaving] = useState(false);
 
@@ -328,20 +362,19 @@ export function AppShell() {
       // 1. Save index to localStorage
       writeLocalIndex(index);
 
-      // 2. Save the FULL index (with content) to Firestore for cross-device sync
-      await saveFullIndexToDB(index);
-
-      // 3. Also save individual slides for backward compatibility
-      const allDocs = collectImportedContent(index);
-      for (const doc of allDocs) {
-        if (doc.content && doc.content.length > 0) {
-          void saveSlide(doc.id, doc.content);
-        }
-      }
-
-      // 4. Force flush all pending writes to Firestore
+      // 2. Flush any pending per-slide writes BEFORE the bulk index write so we
+      //    don't flood the Firestore write stream with simultaneous queued writes.
       await forceFlushAll();
 
+      // 3. Save the FULL index (with content) to Firestore for cross-device sync.
+      //    This document is authoritative and contains every slide's content, so
+      //    there is no need to also re-write each individual slide here (doing so
+      //    previously doubled the write volume and exhausted the write stream).
+      await saveFullIndexToDB(index);
+
+      // Remember what we just pushed so the realtime listener treats the echo as a no-op.
+      lastServerSerializedRef.current = serializeIndex(index);
+      clearDirty();
       toast({ title: "Guardado completo", description: "Todos los cambios se guardaron en Firebase. Estarán disponibles en todos tus dispositivos." });
     } catch (err) {
       console.error('[APP] Error saving all:', err);
@@ -353,7 +386,7 @@ export function AppShell() {
     } finally {
       setIsSaving(false);
     }
-  }, [index, toast]);
+  }, [index, toast, clearDirty]);
 
   const appContextValue = useMemo(() => ({ togglePresentationMode }), [togglePresentationMode]);
 
@@ -374,7 +407,6 @@ export function AppShell() {
             index={index}
             canPresent={canPresent}
             onSave={handleSave}
-            onRelocate={handleRelocate}
             isPresentationMode={true}
             onNavigate={handleNavigate}
             prevSlideId={prevSlideId}
@@ -404,6 +436,12 @@ export function AppShell() {
             onImport={handleImport}
             onSaveAll={handleSaveAll}
             isSaving={isSaving}
+            isDirty={isDirty}
+            onRename={handleRename}
+            onDelete={handleDeleteItem}
+            onAddItem={handleAddItem}
+            onMove={handleMove}
+            onRenumber={handleRenumber}
           />
         </div>
 
@@ -452,7 +490,6 @@ export function AppShell() {
             index={index}
             canPresent={canPresent}
             onSave={handleSave}
-            onRelocate={handleRelocate}
             isPresentationMode={false}
             onNavigate={handleNavigate}
             prevSlideId={prevSlideId}

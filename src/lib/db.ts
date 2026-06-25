@@ -1,7 +1,7 @@
 "use client";
 
 import { db } from './firebase';
-import { collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, orderBy, limit, writeBatch } from "firebase/firestore";
+import { collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, orderBy, limit, writeBatch, onSnapshot } from "firebase/firestore";
 
 const SLIDES_COLLECTION = 'slides';
 const CONTENT_CHUNKS_SUBCOLLECTION = 'contentChunks';
@@ -240,4 +240,39 @@ export const loadFullIndexFromDB = async (): Promise<unknown[] | null> => {
     console.error("[DB] Error loading full index from Firestore:", error);
     throw error;
   }
+};
+
+/**
+ * Subscribe to real-time updates of the full index document.
+ * Ignores snapshots that originate from this client's own pending writes so we
+ * don't react to our own echoes. Returns an unsubscribe function.
+ */
+export const subscribeFullIndex = (
+  onData: (index: unknown[] | null) => void,
+  onError?: (error: unknown) => void
+): (() => void) => {
+  const indexRef = doc(db, META_COLLECTION, FULL_INDEX_DOC);
+  return onSnapshot(
+    indexRef,
+    (snap) => {
+      // Skip our own un-acknowledged local writes to avoid feedback loops.
+      if (snap.metadata.hasPendingWrites) return;
+      (async () => {
+        try {
+          if (!snap.exists()) { onData(null); return; }
+          const data = snap.data() as { data?: string | null; chunked?: boolean };
+          if (!data.chunked && data.data) {
+            onData(JSON.parse(data.data) as unknown[]);
+            return;
+          }
+          if (!data.chunked) { onData(null); return; }
+          // Chunked payload: reassemble using the existing loader.
+          onData(await loadFullIndexFromDB());
+        } catch (e) {
+          onError?.(e);
+        }
+      })();
+    },
+    (err) => onError?.(err)
+  );
 };
