@@ -5,6 +5,7 @@ import type { IndexItem } from '@/lib/types';
 import { INDEX } from '@/lib/constants';
 import { saveSlide, deleteSlide, loadAllSlidesCached, forceFlushAll } from '@/lib/services/slides';
 import { saveFullIndexToDB, loadFullIndexFromDB, subscribeFullIndex } from '@/lib/db';
+import { readLocalIndex, writeLocalIndex } from '@/lib/local-index-backup';
 import {
   flattenIndex,
   findItemById,
@@ -28,30 +29,6 @@ import { AppProvider } from './app-context';
 import { IndexPanel } from './index-panel';
 import { ViewerPanel } from './viewer-panel';
 import { cn } from '@/lib/utils';
-
-const LOCAL_INDEX_KEY = 'fire-db-sys.index.v1';
-
-function readLocalIndex(): IndexItem[] | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(LOCAL_INDEX_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as IndexItem[];
-    return Array.isArray(parsed) ? parsed : null;
-  } catch (e) {
-    console.warn('[APP] Failed to read local index backup:', e);
-    return null;
-  }
-}
-
-function writeLocalIndex(index: IndexItem[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(LOCAL_INDEX_KEY, JSON.stringify(index));
-  } catch (e) {
-    console.warn('[APP] Failed to write local index backup:', e);
-  }
-}
 
 function ignorePermissionError(action: () => Promise<unknown> | void): void {
   try {
@@ -85,12 +62,18 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    const localIndex = readLocalIndex();
-    if (localIndex) {
-      setIndex(localIndex);
-    }
-    setLocalIndexReady(true);
-    setMounted(true);
+    let cancelled = false;
+    void readLocalIndex().then((localIndex) => {
+      if (cancelled) return;
+      if (localIndex) {
+        setIndex(localIndex);
+      }
+      setLocalIndexReady(true);
+      setMounted(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Warn before leaving with unsaved changes.
@@ -106,7 +89,7 @@ export function AppShell() {
 
   useEffect(() => {
     if (!localIndexReady) return;
-    writeLocalIndex(index);
+    void writeLocalIndex(index);
   }, [index, localIndexReady]);
 
   const flat = useMemo(() => flattenIndex(index), [index]);
@@ -145,7 +128,7 @@ export function AppShell() {
         if (fullIndex && Array.isArray(fullIndex) && fullIndex.length > 0) {
           console.log('[APP] Full index loaded from Firestore:', fullIndex.length, 'items');
           setIndex(fullIndex as IndexItem[]);
-          writeLocalIndex(fullIndex as IndexItem[]);
+          await writeLocalIndex(fullIndex as IndexItem[]);
           return;
         }
       } catch (err) {
@@ -186,7 +169,7 @@ export function AppShell() {
         lastServerSerializedRef.current = serialized;
         setIndex((prev) => {
           if (serializeIndex(prev) === serialized) return prev;
-          writeLocalIndex(remote as IndexItem[]);
+          void writeLocalIndex(remote as IndexItem[]);
           return remote as IndexItem[];
         });
       },
@@ -331,7 +314,7 @@ export function AppShell() {
       const parsed = JSON.parse(data) as IndexItem[];
       if (!Array.isArray(parsed)) throw new Error('Formato inválido');
       setIndex(parsed);
-      writeLocalIndex(parsed);
+      void writeLocalIndex(parsed);
       loadedSlidesRef.current.clear();
       markDirty();
       // Persist the imported tree as the authoritative full index instead of
@@ -359,8 +342,9 @@ export function AppShell() {
   const handleSaveAll = useCallback(async () => {
     setIsSaving(true);
     try {
-      // 1. Save index to localStorage
-      writeLocalIndex(index);
+      // 1. Save the full local backup to IndexedDB (with a compact
+      //    localStorage fallback for browsers where IndexedDB is disabled).
+      await writeLocalIndex(index);
 
       // 2. Flush any pending per-slide writes BEFORE the bulk index write so we
       //    don't flood the Firestore write stream with simultaneous queued writes.
