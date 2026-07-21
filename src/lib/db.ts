@@ -1,7 +1,18 @@
 "use client";
 
 import { db } from './firebase';
-import { collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, orderBy, limit, writeBatch, onSnapshot } from "firebase/firestore";
+import { collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+import type { CollectionReference, DocumentData } from 'firebase/firestore';
+import {
+  FIRESTORE_CHUNK_MAX_BYTES,
+  FIRESTORE_VERSIONED_CHUNK_INDEX_OFFSET,
+  createFirestoreChunkRevision,
+  firestoreChunkDocumentId,
+  parseFirestoreChunkManifest,
+  publishVersionedChunks,
+  splitUtf8IntoChunks,
+  utf8ByteLength,
+} from './firestore-chunking';
 
 const SLIDES_COLLECTION = 'slides';
 const CONTENT_CHUNKS_SUBCOLLECTION = 'contentChunks';
@@ -9,70 +20,114 @@ const META_COLLECTION = 'meta';
 const FULL_INDEX_DOC = 'fullIndex';
 const INDEX_CHUNKS_SUBCOLLECTION = 'indexChunks';
 
-function utf8ByteLength(input: string): number {
-  return new TextEncoder().encode(input).byteLength;
+const RETRYABLE_WRITE_CODES = new Set([
+  'aborted',
+  'deadline-exceeded',
+  'internal',
+  'resource-exhausted',
+  'unavailable',
+]);
+
+function firestoreErrorCode(error: unknown): string | undefined {
+  return (error as { code?: string } | null)?.code;
 }
 
-function splitUtf8IntoChunks(input: string, maxBytes: number): string[] {
-  const encoder = new TextEncoder();
-  const bytes = encoder.encode(input);
-  const decoder = new TextDecoder('utf-8', { fatal: true });
-  const chunks: string[] = [];
-
-  let start = 0;
-  while (start < bytes.length) {
-    let end = Math.min(start + maxBytes, bytes.length);
-    while (end > start) {
-      try {
-        const part = decoder.decode(bytes.slice(start, end));
-        chunks.push(part);
-        break;
-      } catch {
-        end -= 1;
+async function writeWithBackoff(action: () => Promise<void>, attempts = 6): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      await action();
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = firestoreErrorCode(error);
+      if (!code || !RETRYABLE_WRITE_CODES.has(code) || attempt === attempts - 1) {
+        throw error;
       }
+      const delayMs = Math.min(8_000, 600 * (2 ** attempt)) + Math.floor(Math.random() * 250);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-    if (end <= start) {
-      throw new Error('Failed to split UTF-8 string into chunks.');
-    }
-    start = end;
   }
-  return chunks;
+  throw lastError;
+}
+
+async function readVersionedChunks(
+  chunksRef: CollectionReference<DocumentData, DocumentData>,
+  revision: string,
+  count: number,
+): Promise<string> {
+  const parts: string[] = [];
+  for (let index = 0; index < count; index++) {
+    const chunkSnap = await getDoc(doc(chunksRef, firestoreChunkDocumentId(revision, index)));
+    if (!chunkSnap.exists()) {
+      throw new Error(`Missing Firestore chunk ${index + 1} of ${count}.`);
+    }
+    const data = (chunkSnap.data() as { data?: unknown }).data;
+    if (typeof data !== 'string') {
+      throw new Error(`Invalid Firestore chunk ${index + 1} of ${count}.`);
+    }
+    parts.push(data);
+  }
+  return parts.join('');
+}
+
+async function readSerializedChunks(
+  chunksRef: CollectionReference<DocumentData, DocumentData>,
+  encodedManifest: unknown,
+): Promise<string> {
+  const manifest = parseFirestoreChunkManifest(encodedManifest);
+  if (manifest.format === 'versioned') {
+    return readVersionedChunks(chunksRef, manifest.revision, manifest.count);
+  }
+
+  const legacyQuery = query(chunksRef, orderBy('index'), limit(manifest.count));
+  const legacySnapshot = await getDocs(legacyQuery);
+  if (legacySnapshot.docs.length !== manifest.count) {
+    throw new Error(`Missing legacy Firestore chunks: expected ${manifest.count}, received ${legacySnapshot.docs.length}.`);
+  }
+  return legacySnapshot.docs.map((chunk, index) => {
+    const data = (chunk.data() as { data?: unknown }).data;
+    if (typeof data !== 'string') {
+      throw new Error(`Invalid legacy Firestore chunk ${index + 1} of ${manifest.count}.`);
+    }
+    return data;
+  }).join('');
 }
 
 export const saveSlideToDB = async (id: string, content: string[] | null): Promise<void> => {
   try {
     const slideRef = doc(db, SLIDES_COLLECTION, id);
     const serialized = JSON.stringify(content ?? null);
-    const maxBytes = 900_000;
 
-    if (utf8ByteLength(serialized) <= maxBytes) {
-      await setDoc(slideRef, { id, content, contentChunked: false });
+    if (utf8ByteLength(serialized) <= FIRESTORE_CHUNK_MAX_BYTES) {
+      await writeWithBackoff(() => setDoc(slideRef, { id, content, contentChunked: false }));
       return;
     }
 
-    const chunks = splitUtf8IntoChunks(serialized, maxBytes);
+    const chunks = splitUtf8IntoChunks(serialized);
+    const revision = createFirestoreChunkRevision();
+    const chunksRef = collection(db, SLIDES_COLLECTION, id, CONTENT_CHUNKS_SUBCOLLECTION);
 
-    let batch = writeBatch(db);
-    let ops = 0;
-
-    batch.set(slideRef, { id, content: null, contentChunked: true, contentChunkCount: chunks.length });
-    ops += 1;
-
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkRef = doc(db, SLIDES_COLLECTION, id, CONTENT_CHUNKS_SUBCOLLECTION, String(i));
-      batch.set(chunkRef, { index: i, data: chunks[i] });
-      ops += 1;
-
-      if (ops >= 450) {
-        await batch.commit();
-        batch = writeBatch(db);
-        ops = 0;
-      }
-    }
-
-    if (ops > 0) {
-      await batch.commit();
-    }
+    // Each upload gets unique document IDs, so concurrent tabs cannot mix their
+    // chunks. The parent manifest is published only after every acknowledgement.
+    await publishVersionedChunks(
+      chunks,
+      revision,
+      async (documentId, index, data) => {
+        await writeWithBackoff(() => setDoc(doc(chunksRef, documentId), {
+          index: FIRESTORE_VERSIONED_CHUNK_INDEX_OFFSET + index,
+          data,
+        }));
+      },
+      async (manifest) => {
+        await writeWithBackoff(() => setDoc(slideRef, {
+          id,
+          content: null,
+          contentChunked: true,
+          contentChunkCount: manifest,
+        }));
+      },
+    );
   } catch (error) {
     console.error("Error saving slide to Firestore:", error);
     throw error;
@@ -87,25 +142,14 @@ export const deleteSlideFromDB = async (id: string): Promise<void> => {
       const chunksRef = collection(db, SLIDES_COLLECTION, id, CONTENT_CHUNKS_SUBCOLLECTION);
       const chunksSnap = await getDocs(chunksRef);
 
-      let batch = writeBatch(db);
-      let ops = 0;
       for (const c of chunksSnap.docs) {
-        batch.delete(c.ref);
-        ops += 1;
-        if (ops >= 450) {
-          await batch.commit();
-          batch = writeBatch(db);
-          ops = 0;
-        }
-      }
-      if (ops > 0) {
-        await batch.commit();
+        await writeWithBackoff(() => deleteDoc(c.ref));
       }
     } catch (e) {
       console.warn('Error deleting slide chunks (continuing):', e);
     }
 
-    await deleteDoc(slideRef);
+    await writeWithBackoff(() => deleteDoc(slideRef));
   } catch (error) {
     console.error("Error deleting slide from Firestore:", error);
     throw error;
@@ -122,7 +166,7 @@ export const loadAllSlidesFromDB = async (): Promise<{id: string, content: strin
       const data = d.data() as {
         content?: string[] | null;
         contentChunked?: boolean;
-        contentChunkCount?: number;
+        contentChunkCount?: unknown;
       };
 
       if (!data.contentChunked) {
@@ -131,12 +175,7 @@ export const loadAllSlidesFromDB = async (): Promise<{id: string, content: strin
       }
 
       const chunksRef = collection(db, SLIDES_COLLECTION, d.id, CONTENT_CHUNKS_SUBCOLLECTION);
-      const chunkCount = typeof data.contentChunkCount === 'number' ? data.contentChunkCount : undefined;
-      const chunksQuery = chunkCount
-        ? query(chunksRef, orderBy('index'), limit(chunkCount))
-        : query(chunksRef, orderBy('index'));
-      const chunksSnap = await getDocs(chunksQuery);
-      const serialized = chunksSnap.docs.map(c => (c.data() as { data?: string }).data || '').join('');
+      const serialized = await readSerializedChunks(chunksRef, data.contentChunkCount);
 
       let parsed: string[] | null = null;
       try {
@@ -162,36 +201,34 @@ export const saveFullIndexToDB = async (index: unknown[]): Promise<void> => {
   try {
     const indexRef = doc(db, META_COLLECTION, FULL_INDEX_DOC);
     const serialized = JSON.stringify(index);
-    const maxBytes = 900_000;
 
-    if (utf8ByteLength(serialized) <= maxBytes) {
-      await setDoc(indexRef, { data: serialized, chunked: false, updatedAt: Date.now() });
+    if (utf8ByteLength(serialized) <= FIRESTORE_CHUNK_MAX_BYTES) {
+      await writeWithBackoff(() => setDoc(indexRef, { data: serialized, chunked: false, updatedAt: Date.now() }));
       return;
     }
 
-    const chunks = splitUtf8IntoChunks(serialized, maxBytes);
+    const chunks = splitUtf8IntoChunks(serialized);
+    const revision = createFirestoreChunkRevision();
+    const chunksRef = collection(db, META_COLLECTION, FULL_INDEX_DOC, INDEX_CHUNKS_SUBCOLLECTION);
 
-    let batch = writeBatch(db);
-    let ops = 0;
-
-    batch.set(indexRef, { data: null, chunked: true, chunkCount: chunks.length, updatedAt: Date.now() });
-    ops += 1;
-
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkRef = doc(db, META_COLLECTION, FULL_INDEX_DOC, INDEX_CHUNKS_SUBCOLLECTION, String(i));
-      batch.set(chunkRef, { index: i, data: chunks[i] });
-      ops += 1;
-
-      if (ops >= 450) {
-        await batch.commit();
-        batch = writeBatch(db);
-        ops = 0;
-      }
-    }
-
-    if (ops > 0) {
-      await batch.commit();
-    }
+    await publishVersionedChunks(
+      chunks,
+      revision,
+      async (documentId, index, data) => {
+        await writeWithBackoff(() => setDoc(doc(chunksRef, documentId), {
+          index: FIRESTORE_VERSIONED_CHUNK_INDEX_OFFSET + index,
+          data,
+        }));
+      },
+      async (manifest) => {
+        await writeWithBackoff(() => setDoc(indexRef, {
+          data: null,
+          chunked: true,
+          chunkCount: manifest,
+          updatedAt: Date.now(),
+        }));
+      },
+    );
     console.log('[DB] Full index saved to Firestore successfully.');
   } catch (error) {
     console.error("[DB] Error saving full index to Firestore:", error);
@@ -216,7 +253,7 @@ export const loadFullIndexFromDB = async (): Promise<unknown[] | null> => {
     const data = snap.data() as {
       data?: string | null;
       chunked?: boolean;
-      chunkCount?: number;
+      chunkCount?: unknown;
     };
 
     if (!data.chunked && data.data) {
@@ -228,12 +265,7 @@ export const loadFullIndexFromDB = async (): Promise<unknown[] | null> => {
     }
 
     const chunksRef = collection(db, META_COLLECTION, FULL_INDEX_DOC, INDEX_CHUNKS_SUBCOLLECTION);
-    const chunkCount = typeof data.chunkCount === 'number' ? data.chunkCount : undefined;
-    const chunksQuery = chunkCount
-      ? query(chunksRef, orderBy('index'), limit(chunkCount))
-      : query(chunksRef, orderBy('index'));
-    const chunksSnap = await getDocs(chunksQuery);
-    const serialized = chunksSnap.docs.map(c => (c.data() as { data?: string }).data || '').join('');
+    const serialized = await readSerializedChunks(chunksRef, data.chunkCount);
 
     return JSON.parse(serialized) as unknown[];
   } catch (error) {

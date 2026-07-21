@@ -133,11 +133,6 @@ async function retry<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 300): 
       return await fn();
     } catch (e) {
       lastErr = e;
-      const code = (e as { code?: string } | undefined)?.code;
-      if (code === 'resource-exhausted') {
-        console.error('Firestore write queue exhausted, not retrying further.', e);
-        break;
-      }
       if (i === attempts - 1) break;
       const jitter = Math.random() * 100;
       await new Promise(res => setTimeout(res, baseDelayMs * Math.pow(2, i) + jitter));
