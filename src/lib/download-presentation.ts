@@ -169,7 +169,7 @@ export function buildStandalonePresentationHtml(item: IndexItem): string {
     <button id="btn-fullscreen" class="icon" title="Pantalla completa">&#x26F6;</button>
   </div>
   <div id="progress"></div>
-  <iframe id="slide-frame" sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals allow-pointer-lock allow-downloads"></iframe>
+  <iframe id="slide-frame" sandbox="allow-scripts allow-popups allow-forms allow-modals allow-pointer-lock allow-downloads"></iframe>
 </div>
 <script>
 (function(){

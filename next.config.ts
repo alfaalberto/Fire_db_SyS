@@ -59,6 +59,18 @@ const nextConfig: NextConfig = {
               ],
             },
             {
+              // Sandboxed srcdoc frames intentionally have an opaque `null`
+              // origin. Fonts referenced by the app stylesheet therefore need
+              // an explicit CORS opt-in even though they come from this server.
+              source: '/_next/static/media/:path*',
+              headers: [
+                { key: 'Access-Control-Allow-Origin', value: '*' },
+                { key: 'Access-Control-Allow-Methods', value: 'GET, OPTIONS' },
+                { key: 'Access-Control-Allow-Headers', value: '*' },
+                { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+              ],
+            },
+            {
               source: '/images/:path*',
               headers: [
                 { key: 'Access-Control-Allow-Origin', value: '*' },

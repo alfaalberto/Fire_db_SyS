@@ -146,11 +146,11 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; style-src 'unsafe-inline' https: http: data:; img-src https: http: data: blob:; media-src https: http: data: blob:; font-src https: http: data:; connect-src https: http: ws: wss: data:; worker-src blob: https: http: data:; child-src https: http: data: blob:; frame-src https: http: data: blob:; object-src 'none'; base-uri 'self'">
   <base href="${baseHref}">
   ${appStylesheetsHtml}
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.25/dist/katex.min.css">
+  <link rel="stylesheet" href="${baseHref}katex/katex.min.css">
   ${katexOverridesHtml}
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.25/dist/katex.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.25/dist/contrib/auto-render.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.25/dist/contrib/mathtex-script-type.min.js"></script>
+  <script defer src="${baseHref}katex/katex.min.js"></script>
+  <script defer src="${baseHref}katex/contrib/auto-render.min.js"></script>
+  <script defer src="${baseHref}katex/contrib/mathtex-script-type.min.js"></script>
   ${injectMathJaxRuntime ? String.raw`
   <script>
     window.MathJax = {
@@ -388,7 +388,7 @@ export const SlideIframe = forwardRef<HTMLIFrameElement, SlideIframeProps>(({ co
     <iframe
       ref={ref}
       title={title}
-      sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals allow-pointer-lock allow-downloads"
+      sandbox="allow-scripts allow-popups allow-forms allow-modals allow-pointer-lock allow-downloads"
       className="w-full h-full border-0"
       srcDoc={mounted ? fullHtml : undefined}
       suppressHydrationWarning
