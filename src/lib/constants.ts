@@ -1,10 +1,17 @@
-import type { IndexItem } from './types';
+import type { OutlineItem } from './types';
 
-const createUniqueIds = (items: IndexItem[], parentId = ''): IndexItem[] => {
+/**
+ * Temario base (índice del libro de Oppenheim, Willsky y Nawab). Se usa como
+ * esqueleto mientras llega el temario real y cuando la base de datos está
+ * vacía. Los ids se derivan del título con esta misma función desde la primera
+ * versión: no debe cambiarse, o dejarían de coincidir con los documentos
+ * `slides/{id}` ya guardados.
+ */
+const createUniqueIds = (items: OutlineItem[], parentId = ''): OutlineItem[] => {
   return items.map(item => {
     const idPart = item.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     const uniqueId = parentId ? `${parentId}-${idPart}` : item.id;
-    const newItem: IndexItem = { ...item, id: uniqueId };
+    const newItem: OutlineItem = { ...item, id: uniqueId };
     if (item.children) {
       newItem.children = createUniqueIds(item.children, uniqueId);
     }
@@ -12,7 +19,7 @@ const createUniqueIds = (items: IndexItem[], parentId = ''): IndexItem[] => {
   });
 };
 
-const originalIndex: IndexItem[] = [
+const originalIndex: OutlineItem[] = [
   {
     id: 'cap1-senales-y-sistemas',
     title: '1. Señales y Sistemas',
@@ -182,4 +189,4 @@ const originalIndex: IndexItem[] = [
   },
 ];
 
-export const INDEX: IndexItem[] = createUniqueIds(originalIndex);
+export const DEFAULT_OUTLINE: OutlineItem[] = createUniqueIds(originalIndex);

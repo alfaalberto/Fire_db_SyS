@@ -1,281 +1,131 @@
-import type { IndexItem } from './types';
+import { buildSlideSrcDoc, repairSlide } from './slide-document';
 
-interface SlideEntry {
+function fileName(title: string): string {
+  return (
+    title
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-zA-Z0-9\s\-_.]/g, '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .toLowerCase()
+      .slice(0, 80) || 'presentacion'
+  );
+}
+
+function save(html: string, name: string): void {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${fileName(name)}.html`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function embedJson(data: unknown): string {
+  // Dentro de <script>: evita cerrar la etiqueta o abrir un comentario HTML.
+  return JSON.stringify(data).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** Descarga una presentación: el mismo archivo que se subió, ya reparado. */
+export function downloadDeck(html: string, title: string): void {
+  save(repairSlide(html), title);
+}
+
+export interface TopicDeck {
   title: string;
-  srcdoc: string;
+  html: string;
 }
 
-function extractHeadAndBody(rawHtml: string): { head: string; body: string } {
-  let head = '';
-  let body = rawHtml;
-
-  const headMatch = rawHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
-  const bodyMatch = rawHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-
-  if (headMatch) head = headMatch[1];
-  if (bodyMatch) {
-    body = bodyMatch[1];
-  } else {
-    body = rawHtml
-      .replace(/<!doctype[^>]*>/gi, '')
-      .replace(/<\/?html[^>]*>/gi, '')
-      .replace(/<\/?head[^>]*>([\s\S]*?)<\/head>/gi, '')
-      .replace(/<\/?body[^>]*>/gi, '');
-  }
-
-  head = head.replace(/<script\b[^>]*src=["'][^"']*polyfill\.io[^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
-  body = body.replace(/<script\b[^>]*src=["'][^"']*polyfill\.io[^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
-
-  return { head, body };
-}
-
-function wrapSlideForSrcdoc(rawHtml: string): string {
-  const { head, body } = extractHeadAndBody(rawHtml);
-
-  const hasMathJax = /(?:window\.)?MathJax\s*=|mathjax@|tex-mml-chtml|MathJax-script/i.test(rawHtml);
-  const hasKatex = /katex/i.test(rawHtml);
-
-  const katexBundle = (!hasKatex)
-    ? `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js"
-    onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true},{left:'$',right:'$',display:false}],throwOnError:false})">
-  </script>`
-    : '';
-
-  const mathJaxBundle = (!hasMathJax)
-    ? `<script>
-  window.MathJax = {
-    tex: { inlineMath: [['\\\\(','\\\\)'],['$','$']], displayMath: [['$$','$$'],['\\\\[','\\\\]']], processEscapes: true },
-    options: { skipHtmlTags: ['script','noscript','style','textarea','pre','code'] },
-    startup: { typeset: false }
-  };
-</script>
-<script async id="MathJax-script-offline" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>`
-    : '';
+/**
+ * Un solo archivo con todas las presentaciones del tema y un selector para
+ * pasar de una a otra. Cada una se muestra íntegra, igual que en la plataforma.
+ */
+export function buildTopicFile(topicTitle: string, decks: TopicDeck[]): string {
+  const entries = decks.map((deck) => ({
+    title: deck.title,
+    srcdoc: buildSlideSrcDoc(deck.html, { token: '', origin: '', theme: 'light', bridge: false, title: deck.title }),
+  }));
 
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  ${katexBundle}
-  ${mathJaxBundle}
-  ${head}
-  <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    html, body {
-      margin: 0; padding: 0; width: 100%; min-height: 100%;
-      background-color: #0d1b2a; color: #E5E7EB;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      line-height: 1.6;
-    }
-    a { color: #2dd4bf; }
-    a:visited { color: #a78bfa; }
-    .katex { font-size: 1.1em; color: inherit; }
-    .katex-display { overflow-x: auto; padding: 0.5rem 0; margin: 0.75rem 0; text-align: center; }
-    .katex .mord, .katex .mbin, .katex .mrel, .katex .mopen,
-    .katex .mclose, .katex .mpunct, .katex .minner { color: inherit; }
-    .katex-html { color: inherit; }
-    #__dl_body { padding: 1.5rem; width: 100%; min-height: 100%; }
-  </style>
-</head>
-<body>
-<div id="__dl_body">${body}</div>
-</body>
-</html>`;
-}
-
-function collectSlides(item: IndexItem, slides: SlideEntry[]): void {
-  if (item.content && item.content.length > 0) {
-    item.content.forEach((html, i) => {
-      const label = item.content!.length > 1
-        ? `${item.title} (${i + 1}/${item.content!.length})`
-        : item.title;
-      slides.push({ title: label, srcdoc: wrapSlideForSrcdoc(html || '') });
-    });
-  }
-
-  if (item.children && item.children.length > 0) {
-    for (const child of item.children) {
-      collectSlides(child, slides);
-    }
-  }
-}
-
-function safeJsonEmbed(data: unknown): string {
-  return JSON.stringify(data)
-    .replace(/<\/script>/gi, '<\\/script>')
-    .replace(/<!--/g, '<\\!--');
-}
-
-export function buildStandalonePresentationHtml(item: IndexItem): string {
-  const slides: SlideEntry[] = [];
-  collectSlides(item, slides);
-
-  if (slides.length === 0) {
-    slides.push({
-      title: item.title,
-      srcdoc: wrapSlideForSrcdoc(`<h1>${item.title}</h1><p>Sin contenido HTML para este tema.</p>`),
-    });
-  }
-
-  const slidesJson = safeJsonEmbed(slides);
-  const presentationTitle = item.title;
-
-  return `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${presentationTitle.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0d1b2a; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; }
-    #app { display: flex; flex-direction: column; height: 100vh; }
-    #toolbar {
-      display: flex; align-items: center; gap: 6px;
-      padding: 6px 12px; background: #1a2332;
-      border-bottom: 1px solid #2d3f52; flex-shrink: 0;
-      min-height: 44px; flex-wrap: wrap;
-    }
-    #toolbar button {
-      background: #2d3f52; border: 1px solid #3d5268; color: #e2e8f0;
-      border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 14px;
-      display: flex; align-items: center; gap: 4px; line-height: 1;
-      transition: background 0.15s;
-    }
-    #toolbar button:hover:not(:disabled) { background: #3d5268; }
-    #toolbar button:disabled { opacity: 0.4; cursor: default; }
-    #toolbar button.icon { padding: 4px 8px; font-size: 16px; }
-    #counter { font-size: 13px; color: #94a3b8; white-space: nowrap; min-width: 54px; text-align: center; }
-    #slide-title { flex: 1; font-size: 13px; font-weight: 500; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; padding: 0 8px; min-width: 0; }
-    #dots { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; max-width: 240px; overflow: hidden; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; border: none; padding: 0; background: #3d5268; cursor: pointer; transition: background 0.15s, transform 0.15s; flex-shrink: 0; }
-    .dot:hover { background: #94a3b8; }
-    .dot.active { background: #2dd4bf; transform: scale(1.3); }
-    #slide-frame { flex: 1; width: 100%; border: none; display: block; min-height: 0; }
-    #progress { height: 3px; background: #2dd4bf; transition: width 0.2s ease; flex-shrink: 0; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(topicTitle)}</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#0B1020;color:#F8FAFC;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+#bar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#141B2E;border-bottom:1px solid #2A3654;min-height:44px}
+#bar button{font:inherit;font-size:14px;color:inherit;background:#1D263E;border:1px solid #2A3654;border-radius:8px;padding:6px 12px;cursor:pointer}
+#bar button:hover:not(:disabled){border-color:#60A5FA}
+#bar button:disabled{opacity:.4;cursor:default}
+#title{flex:1;min-width:0;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#count{font-variant-numeric:tabular-nums;font-size:13px;color:#B7C0D8;white-space:nowrap}
+#frame{flex:1;min-height:0;width:100%;border:0;background:#fff}
+</style>
 </head>
 <body>
 <div id="app">
-  <div id="toolbar">
-    <button id="btn-prev" class="icon" title="Anterior">&#8592;</button>
-    <span id="counter">1 / 1</span>
-    <button id="btn-next" class="icon" title="Siguiente">&#8594;</button>
-    <span id="slide-title"></span>
-    <div id="dots"></div>
-    <button id="btn-fullscreen" class="icon" title="Pantalla completa">&#x26F6;</button>
+  <div id="bar">
+    <button id="prev" type="button" aria-label="Presentación anterior">Anterior</button>
+    <span id="count"></span>
+    <button id="next" type="button" aria-label="Presentación siguiente">Siguiente</button>
+    <span id="title"></span>
   </div>
-  <div id="progress"></div>
-  <iframe id="slide-frame" sandbox="allow-scripts allow-popups allow-forms allow-modals allow-pointer-lock allow-downloads"></iframe>
+  <iframe id="frame" title="Presentación" allow="fullscreen" allowfullscreen sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-pointer-lock allow-downloads"></iframe>
 </div>
 <script>
 (function(){
-  var SLIDES = ${slidesJson};
-  var current = 0;
-  var frame = document.getElementById('slide-frame');
-  var counter = document.getElementById('counter');
-  var titleEl = document.getElementById('slide-title');
-  var btnPrev = document.getElementById('btn-prev');
-  var btnNext = document.getElementById('btn-next');
-  var dotsEl = document.getElementById('dots');
-  var progress = document.getElementById('progress');
-  var btnFS = document.getElementById('btn-fullscreen');
-  var SHOW_DOTS = SLIDES.length <= 25;
-
-  function buildDots() {
-    if (!SHOW_DOTS) { dotsEl.style.display = 'none'; return; }
-    dotsEl.innerHTML = '';
-    SLIDES.forEach(function(_, i) {
-      var d = document.createElement('button');
-      d.className = 'dot' + (i === current ? ' active' : '');
-      d.title = SLIDES[i].title;
-      d.addEventListener('click', function(){ show(i); });
-      dotsEl.appendChild(d);
-    });
+  var DECKS=${embedJson(entries)};
+  var current=0;
+  var frame=document.getElementById('frame');
+  var prev=document.getElementById('prev');
+  var next=document.getElementById('next');
+  function show(i){
+    current=Math.max(0,Math.min(DECKS.length-1,i));
+    frame.srcdoc=DECKS[current].srcdoc;
+    document.getElementById('title').textContent=DECKS[current].title;
+    document.getElementById('count').textContent=(current+1)+' de '+DECKS.length;
+    prev.disabled=current===0;
+    next.disabled=current===DECKS.length-1;
+    try{history.replaceState(null,'','#'+(current+1));}catch(e){}
   }
-
-  function show(index) {
-    current = Math.max(0, Math.min(SLIDES.length - 1, index));
-    var s = SLIDES[current];
-    frame.srcdoc = s.srcdoc;
-    counter.textContent = (current + 1) + ' / ' + SLIDES.length;
-    titleEl.textContent = s.title;
-    btnPrev.disabled = current === 0;
-    btnNext.disabled = current === SLIDES.length - 1;
-    var pct = SLIDES.length > 1 ? Math.round((current / (SLIDES.length - 1)) * 100) : 100;
-    progress.style.width = pct + '%';
-    if (SHOW_DOTS) {
-      var dots = dotsEl.querySelectorAll('.dot');
-      dots.forEach(function(d, i){ d.className = 'dot' + (i === current ? ' active' : ''); });
-    }
-    try { window.history.replaceState(null, '', '#' + (current + 1)); } catch(e){}
-  }
-
-  function navigate(dir) { show(current + dir); }
-  btnPrev.addEventListener('click', function(){ navigate(-1); });
-  btnNext.addEventListener('click', function(){ navigate(1); });
-
-  document.addEventListener('keydown', function(e) {
-    var ae = document.activeElement;
-    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); navigate(1); }
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); navigate(-1); }
-    else if (e.key === 'Home') { e.preventDefault(); show(0); }
-    else if (e.key === 'End') { e.preventDefault(); show(SLIDES.length - 1); }
-    else if (e.key === 'f' || e.key === 'F') { toggleFullscreen(); }
-  });
-
-  btnFS.addEventListener('click', toggleFullscreen);
-
-  function toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(function(){});
-    } else {
-      document.exitFullscreen().catch(function(){});
-    }
-  }
-
-  document.addEventListener('fullscreenchange', function() {
-    btnFS.textContent = document.fullscreenElement ? '\\u2715' : '\\u26F6';
-    btnFS.title = document.fullscreenElement ? 'Salir de pantalla completa' : 'Pantalla completa';
-  });
-
-  try {
-    var hash = parseInt(window.location.hash.replace('#',''), 10);
-    if (!isNaN(hash) && hash >= 1 && hash <= SLIDES.length) current = hash - 1;
-  } catch(e) {}
-
-  buildDots();
-  show(current);
+  prev.addEventListener('click',function(){show(current-1);});
+  next.addEventListener('click',function(){show(current+1);});
+  var start=parseInt(location.hash.slice(1),10);
+  show(isNaN(start)?0:start-1);
 })();
 </script>
 </body>
 </html>`;
 }
 
-export function downloadPresentation(item: IndexItem): void {
-  const html = buildStandalonePresentationHtml(item);
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+export function downloadTopic(topicTitle: string, decks: TopicDeck[]): void {
+  if (decks.length === 1) {
+    downloadDeck(decks[0].html, decks[0].title || topicTitle);
+    return;
+  }
+  save(buildTopicFile(topicTitle, decks), topicTitle);
+}
+
+/** Descarga un respaldo completo (árbol con HTML) como JSON. */
+export function downloadBackup(index: unknown): void {
+  const blob = new Blob([JSON.stringify(index)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-
-  const filename = item.title
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9\s\-_]/g, '')
-    .trim()
-    .replace(/\s+/g, '_')
-    .toLowerCase()
-    .slice(0, 80) || 'presentacion';
-
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${filename}.html`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `senales-sistemas-respaldo-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }

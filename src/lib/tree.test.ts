@@ -4,10 +4,7 @@ import {
   flattenIndex,
   findItemById,
   getBreadcrumbs,
-  updateItemContent,
-  mergeLoadedContent,
   collectAllIds,
-  collectContentIds,
   generateUniqueId,
   renameItem,
   deleteItem,
@@ -15,7 +12,9 @@ import {
   isSelfOrDescendant,
   moveItem,
   renumberIndex,
+  splitNumberPrefix,
   stripNumberPrefix,
+  updateItem,
 } from './tree';
 
 function sample(): IndexItem[] {
@@ -53,28 +52,26 @@ describe('lookup helpers', () => {
     expect(getBreadcrumbs(sample(), 'missing')).toEqual([]);
   });
 
-  it('collectAllIds and collectContentIds gather the right ids', () => {
+  it('collectAllIds gathers every id', () => {
     expect(collectAllIds(sample()).size).toBe(5);
-    expect(collectContentIds(sample())).toEqual(['cap1-b']);
   });
 });
 
-describe('content helpers', () => {
-  it('updateItemContent sets content and clears it when empty', () => {
-    const withContent = updateItemContent(sample(), 'cap1-a', ['<p>x</p>']);
-    expect(findItemById(withContent, 'cap1-a')?.content).toEqual(['<p>x</p>']);
-    const cleared = updateItemContent(withContent, 'cap1-a', []);
-    expect(findItemById(cleared, 'cap1-a')?.content).toBeUndefined();
+describe('updateItem', () => {
+  it('copies only the path to the target and shares the rest', () => {
+    const original = sample();
+    const updated = updateItem(original, 'cap1-a', (item) => ({ ...item, title: 'Cambiado' }));
+    expect(findItemById(updated, 'cap1-a')?.title).toBe('Cambiado');
+    expect(updated).not.toBe(original);
+    expect(updated[0]).not.toBe(original[0]);
+    // El capítulo que no se tocó es el mismo objeto.
+    expect(updated[1]).toBe(original[1]);
+    expect(findItemById(original, 'cap1-a')?.title).toBe('1.1 Intro');
   });
 
-  it('mergeLoadedContent only fills missing local content', () => {
-    const merged = mergeLoadedContent(sample(), [
-      { id: 'cap1-a', content: ['<p>remote</p>'] },
-      { id: 'cap1-b', content: ['<p>should-not-overwrite</p>'] },
-    ]);
-    expect(findItemById(merged, 'cap1-a')?.content).toEqual(['<p>remote</p>']);
-    // cap1-b already had local content, so it is preserved.
-    expect(findItemById(merged, 'cap1-b')?.content).toEqual(['<h1>Hola</h1>']);
+  it('returns the same array when the id does not exist', () => {
+    const original = sample();
+    expect(updateItem(original, 'nope', (item) => ({ ...item, title: 'x' }))).toBe(original);
   });
 });
 
@@ -159,6 +156,27 @@ describe('renumberIndex', () => {
     expect(out[0].children?.[0].title).toBe('1.1 Hijo');
     expect(out[0].children?.[1].title).toBe('Resumen sin número');
     expect(out[1].title).toBe('2. Primero');
+  });
+
+  it('keeps each title\'s own style (with or without trailing dot)', () => {
+    const live: IndexItem[] = [
+      { id: 'b', title: '4 Segundo', children: [{ id: 'b1', title: '4.7 Hijo' }] },
+      { id: 'a', title: '1 Primero' },
+    ];
+    const out = renumberIndex(live);
+    expect(out.map((item) => item.title)).toEqual(['1 Segundo', '2 Primero']);
+    expect(out[0].children?.[0].title).toBe('1.1 Hijo');
+  });
+
+  it('returns the same array when nothing changes', () => {
+    const tidy: IndexItem[] = [{ id: 'a', title: '1 Uno', children: [{ id: 'a1', title: '1.1 Hijo' }] }];
+    expect(renumberIndex(tidy)).toBe(tidy);
+  });
+
+  it('splitNumberPrefix separates the section number from the text', () => {
+    expect(splitNumberPrefix('1.2 Señales continuas')).toEqual({ number: '1.2', text: 'Señales continuas' });
+    expect(splitNumberPrefix('3. Fourier')).toEqual({ number: '3', text: 'Fourier' });
+    expect(splitNumberPrefix('Resumen')).toEqual({ number: null, text: 'Resumen' });
   });
 
   it('stripNumberPrefix removes leading numbering only', () => {

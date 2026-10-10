@@ -2,26 +2,14 @@
 
 import { useEffect } from 'react';
 
+/** Registra el service worker (solo en producción, para no cachear en desarrollo). */
 export function SwRegister() {
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch((err) => {
-        console.warn('SW registration failed:', err);
-      });
-
-      if ('caches' in window) {
-        caches.keys().then((names) => {
-          const currentVersion = 'v1';
-          return Promise.all(
-            names
-              .filter((name) => name !== currentVersion)
-              .map((name) => caches.delete(name))
-          );
-        }).catch((err) => {
-          console.warn('Cache cleanup failed:', err);
-        });
-      }
-    }
+    if (process.env.NODE_ENV !== 'production') return;
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Sin service worker la app funciona igual; solo pierde el modo sin conexión.
+    });
   }, []);
 
   return null;
