@@ -163,8 +163,94 @@ test.describe('presentaciones que no caben a lo ancho', () => {
     await expect(frame(page)).toHaveCSS('transform', 'none');
 
     await page.getByRole('button', { name: 'Más opciones' }).click();
-    await page.getByRole('menuitem', { name: 'Ajustar al ancho de la pantalla' }).click();
+    await page.getByRole('menuitem', { name: 'Ajustar a la pantalla' }).click();
     await expect(frame(page)).toHaveCSS('transform', /^matrix\(0\.87/);
+  });
+});
+
+test.describe('presentaciones que dejan márgenes vacíos', () => {
+  const frame = (page: Page) => page.locator('main iframe');
+  /** Escala aplicada al iframe (1 = tamaño natural). */
+  const scaleOf = (page: Page) =>
+    frame(page).evaluate((el) => {
+      const value = getComputedStyle(el).transform;
+      return value === 'none' ? 1 : Number(value.slice(7).split(',')[0]);
+    });
+  /** La presentación no necesita desplazarse en vertical. */
+  const fitsInHeight = (page: Page) =>
+    deck(page)
+      .locator('body')
+      .evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 6);
+
+  test('una página larga en columna estrecha se amplía hasta llenar el ancho', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-tamano/1');
+    await expectHeading(page, 'Columna estrecha');
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.3[34]/);
+    // La columna queda dentro de la ventana.
+    const box = await deck(page).locator('main').boundingBox();
+    const outer = await frame(page).boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(outer!.x - 1);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(outer!.x + outer!.width + 1);
+  });
+
+  test('una lámina corta se amplía y sigue cabiendo', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-tamano/2');
+    await expectHeading(page, 'Lámina corta');
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.3[34]/);
+    expect(await fitsInHeight(page)).toBe(true);
+  });
+
+  test('una lámina que casi llena el alto solo se amplía hasta donde cabe', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-tamano/3');
+    await expectHeading(page, 'Lámina justa');
+    await expect.poll(() => scaleOf(page)).toBeGreaterThan(1.05);
+    await page.waitForTimeout(900);
+    const scale = await scaleOf(page);
+    expect(scale).toBeGreaterThan(1.05);
+    expect(scale).toBeLessThan(1.3);
+    expect(await fitsInHeight(page)).toBe(true);
+  });
+
+  test('la ampliación baja al llegar a una lámina más alta y ya no vuelve a subir', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-tamano/4');
+    await expectHeading(page, 'Corta');
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.3[34]/);
+
+    await deck(page).getByRole('button', { name: 'Siguiente' }).click();
+    await expectHeading(page, 'Justa');
+    await expect.poll(() => scaleOf(page)).toBeLessThan(1.3);
+    await page.waitForTimeout(900);
+    const tight = await scaleOf(page);
+    expect(await fitsInHeight(page)).toBe(true);
+
+    await deck(page).getByRole('button', { name: 'Anterior' }).click();
+    await expectHeading(page, 'Corta');
+    await page.waitForTimeout(900);
+    expect(await scaleOf(page)).toBeCloseTo(tight, 2);
+  });
+
+  test('el lector puede volver al tamaño real', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-tamano/1');
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.3[34]/);
+    await page.getByRole('button', { name: 'Más opciones' }).click();
+    await page.getByRole('menuitem', { name: /Ver a tamaño real \(ahora al 134 %\)/ }).click();
+    await expect(frame(page)).toHaveCSS('transform', 'none');
+  });
+
+  test('en el escritorio, una cabecera que se sale no achica toda la presentación', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-tamano/5');
+    await expectHeading(page, 'Cabecera larga');
+    await page.waitForTimeout(1500);
+    await expect(frame(page)).toHaveCSS('transform', 'none');
+  });
+
+  test('pero sí la reduce si lo que queda fuera es el botón de avanzar', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-tamano/6');
+    await expectHeading(page, 'Avance cortado');
+    await expect.poll(() => scaleOf(page)).toBeLessThan(0.75);
+    const next = await deck(page).getByRole('button', { name: 'Siguiente' }).boundingBox();
+    const outer = await frame(page).boundingBox();
+    expect(next!.x + next!.width).toBeLessThanOrEqual(outer!.x + outer!.width + 1);
   });
 });
 

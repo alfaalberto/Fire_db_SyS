@@ -2,6 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { buildSlideSrcDoc } from '@/lib/slide-document';
+import { createFit, nextFit, scaleOf, type FitMemory, type LayoutReport } from '@/lib/slide-fit';
 import { cn } from '@/lib/utils';
 
 export interface DeckProgress {
@@ -36,7 +37,7 @@ interface SlideFrameProps {
   onRuntimeError?: (message: string) => void;
   /** Fórmulas que la presentación dejó en crudo y convirtió la plataforma. */
   onMathRescue?: (count: number) => void;
-  /** `false` la deja a su tamaño natural aunque no quepa a lo ancho. */
+  /** `false` la deja siempre a su tamaño natural. */
   fit?: boolean;
   onFit?: (state: FitState) => void;
 }
@@ -44,7 +45,7 @@ interface SlideFrameProps {
 export interface FitState {
   /** Escala con la que se muestra (1 = tamaño natural). */
   scale: number;
-  /** El contenido se sale a lo ancho: tiene sentido ofrecer el ajuste. */
+  /** A su tamaño natural no cabe o deja márgenes: tiene sentido ofrecer el ajuste. */
   needed: boolean;
 }
 
@@ -55,14 +56,12 @@ const TRUSTED = process.env.NEXT_PUBLIC_TRUST_SLIDES !== 'false';
 const SANDBOX =
   'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-pointer-lock allow-downloads';
 
-/** Reducción máxima; por debajo el texto deja de leerse. Igual a MIN_FIT en el puente. */
-const MIN_SCALE = 0.6;
-/** Un desborde mínimo (una barra de desplazamiento, un borde) no justifica reducir. */
-const FIT_TOLERANCE = 1.03;
-/** Ajustes seguidos permitidos mientras la presentación se reacomoda. */
-const MAX_FIT_STEPS = 3;
-/** Si agrandar no acorta lo que sobresale al menos esto, no tiene arreglo. */
-const FIT_PROGRESS = 0.85;
+/** Espera máxima, tras cargar, a que se decida el tamaño antes de mostrarla. */
+const SETTLE_MS = 700;
+/** Lo que se oculta mientras se recoloca con un tamaño nuevo. */
+const RESETTLE_MS = 450;
+/** Cambio de sitio (pantalla completa, panel lateral) que merece ocultarla un instante. */
+const BIG_CHANGE = 0.2;
 
 function newToken(): string {
   const bytes = new Uint8Array(12);
@@ -76,10 +75,10 @@ function newToken(): string {
  * modo presentación, o cambiar el tema de la app, se comunica por mensajes
  * para que la presentación no se reinicie ni pierda la lámina en la que va.
  *
- * Si el contenido no cabe a lo ancho (una barra de botones que se sale en un
- * teléfono, por ejemplo), el iframe se dibuja con el ancho que necesita y se
- * reduce hasta caber: se ve entera, como una página de escritorio en el móvil,
- * en lugar de recortada.
+ * El iframe puede dibujarse con un ancho distinto del disponible y escalarse
+ * para ocupar su sitio: más ancho y reducido si el contenido no cabe (una
+ * barra de botones en el teléfono), más estrecho y ampliado si la presentación
+ * deja márgenes vacíos (un proyector). Mide el puente; decide `slide-fit`.
  */
 export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function SlideFrame(
   {
@@ -112,8 +111,17 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
   const [boxWidth, setBoxWidth] = useState(0);
   const [fitWidth, setFitWidth] = useState<number | null>(null);
   const [fitNeeded, setFitNeeded] = useState(false);
-  const fitState = useRef({ box: 0, width: null as number | null, steps: 0, over: 0, gaveUp: false, enabled: fit });
+  const fitState = useRef<{ box: { w: number; h: number }; memory: FitMemory; enabled: boolean }>({
+    box: { w: 0, h: 0 },
+    memory: createFit(),
+    enabled: fit,
+  });
   fitState.current.enabled = fit;
+  // Mientras se decide el tamaño no se muestra: así no se ve el salto.
+  const [settling, setSettling] = useState(bridge);
+  // Ya se mostró alguna vez: los ajustes posteriores no enseñan el indicador de carga.
+  const [shown, setShown] = useState(false);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Valores con los que se construye el documento; los cambios posteriores
   // viajan por mensaje (ver efectos de abajo).
@@ -150,36 +158,70 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
 
   /** Vuelve al tamaño natural y olvida lo medido. */
   const resetFit = useCallback(() => {
-    const state = fitState.current;
-    state.width = null;
-    state.steps = 0;
-    state.over = 0;
-    state.gaveUp = false;
+    fitState.current.memory = createFit();
     setFitWidth(null);
     setFitNeeded(false);
   }, []);
+
+  /** Oculta la presentación hasta `ms` como mucho, mientras se recoloca. */
+  const hold = useCallback((ms: number) => {
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    setSettling(true);
+    settleTimer.current = setTimeout(() => {
+      settleTimer.current = null;
+      setSettling(false);
+    }, ms);
+  }, []);
+
+  const release = useCallback(() => {
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = null;
+    setSettling(false);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (settleTimer.current) clearTimeout(settleTimer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     setLoaded(false);
     readyRef.current = false;
     resetFit();
-  }, [srcDoc, resetFit]);
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = null;
+    setSettling(bridge);
+    setShown(false);
+  }, [srcDoc, bridge, resetFit]);
 
-  // Con otro ancho disponible la medida anterior ya no vale: se vuelve al
-  // tamaño natural y el puente, al notar el cambio, mide de nuevo.
+  useEffect(() => {
+    if (loaded && !settling) setShown(true);
+  }, [loaded, settling]);
+
+  // Con otro sitio disponible lo medido ya no vale: se vuelve al tamaño
+  // natural y el puente, al notar el cambio, mide de nuevo.
   useEffect(() => {
     const element = boxRef.current;
     if (!element || typeof ResizeObserver !== 'function') return;
     const observer = new ResizeObserver((entries) => {
-      const width = Math.round(entries[0].contentRect.width);
-      if (width === fitState.current.box) return;
-      fitState.current.box = width;
-      setBoxWidth(width);
+      const w = Math.round(entries[0].contentRect.width);
+      const h = Math.round(entries[0].contentRect.height);
+      const before = fitState.current.box;
+      if (w === before.w && h === before.h) return;
+      const big = before.w > 0 && (Math.abs(w - before.w) > before.w * BIG_CHANGE || Math.abs(h - before.h) > before.h * BIG_CHANGE);
+      const adjusted = fitState.current.memory.width !== null;
+      fitState.current.box = { w, h };
+      setBoxWidth(w);
       resetFit();
+      // Pantalla completa, panel lateral: se oculta un instante para que no se
+      // vea a un tamaño y luego a otro. Arrastrar el borde de la ventana no.
+      if (readyRef.current && big && (adjusted || fitState.current.enabled)) hold(RESETTLE_MS);
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [resetFit]);
+  }, [hold, resetFit]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -196,6 +238,11 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
         files?: unknown;
         need?: number;
         width?: number;
+        height?: number;
+        main?: number;
+        nav?: boolean;
+        tall?: number;
+        col?: number;
         count?: number;
       } | null;
       if (!data || data.__sys !== tokenRef.current) return;
@@ -204,6 +251,8 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
         case 'ready':
           readyRef.current = true;
           setLoaded(true);
+          // Se muestra en cuanto el puente mida; si tarda, sin esperar más.
+          hold(SETTLE_MS);
           send({ t: 'mode', presenting: live.current.presenting });
           send({ t: 'theme', theme: live.current.theme });
           break;
@@ -232,33 +281,37 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
           h.onMathRescue?.(Number(data.count) || 0);
           break;
         case 'layout': {
-          const need = Number(data.need);
           const width = Number(data.width);
+          const need = Number(data.need);
           const state = fitState.current;
-          if (!(need > 0) || !(width > 0) || state.box <= 0 || state.gaveUp) break;
-          const current = state.width ?? state.box;
+          if (!(width > 0) || !(need > 0) || state.box.w <= 0) break;
           // Medida tomada con otro ancho: llegó tarde, tras un cambio de tamaño.
-          if (Math.abs(width - current) > 2) break;
-          if (need <= width * FIT_TOLERANCE) break;
-          setFitNeeded(true);
-          if (!state.enabled) break;
-          const over = need - width;
-          if (state.width !== null && over >= state.over * FIT_PROGRESS) {
-            // Agrandar no acortó lo que sobresale: mide según la ventana (un
-            // `97vw` más relleno) y nunca cabrá. Se deja a su tamaño natural.
-            state.gaveUp = true;
-            state.width = null;
-            setFitWidth(null);
-            setFitNeeded(false);
+          if (Math.abs(width - (state.memory.width ?? state.box.w)) > 2) break;
+          const report: LayoutReport = {
+            width,
+            height: Number(data.height) || 0,
+            need,
+            main: Number(data.main) || need,
+            nav: data.nav === true,
+            tall: Number(data.tall) || 0,
+            col: Number(data.col) || 0,
+          };
+          if (!state.enabled) {
+            // Ajuste desactivado: solo se anota si haría falta.
+            setFitNeeded(nextFit(createFit(), report, state.box).width !== null);
+            release();
             break;
           }
-          if (state.steps >= MAX_FIT_STEPS) break;
-          const next = Math.min(Math.ceil(need), Math.floor(state.box / MIN_SCALE));
-          if (next <= current + 4) break;
-          state.width = next;
-          state.steps += 1;
-          state.over = over;
-          setFitWidth(next);
+          const out = nextFit(state.memory, report, state.box);
+          const changed = out.width !== state.memory.width;
+          state.memory = out.memory;
+          setFitNeeded(out.width !== null);
+          if (changed) {
+            setFitWidth(out.width);
+            hold(RESETTLE_MS);
+          } else {
+            release();
+          }
           break;
         }
         case 'relayout':
@@ -269,7 +322,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [bridge, resetFit, send]);
+  }, [bridge, hold, release, resetFit, send]);
 
   useEffect(() => {
     if (readyRef.current) send({ t: 'mode', presenting });
@@ -284,11 +337,14 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
       return;
     }
     resetFit();
-    if (readyRef.current) send({ t: 'measure' });
-  }, [fit, resetFit, send]);
+    if (readyRef.current) {
+      hold(RESETTLE_MS);
+      send({ t: 'measure' });
+    }
+  }, [fit, hold, resetFit, send]);
 
-  const scaled = fit && fitWidth !== null && boxWidth > 0 && fitWidth > boxWidth + 1;
-  const scale = scaled ? boxWidth / fitWidth : 1;
+  const scaled = fit && fitWidth !== null && boxWidth > 0 && Math.abs(fitWidth - boxWidth) > 1;
+  const scale = scaled ? scaleOf(fitWidth, boxWidth) : 1;
 
   useEffect(() => {
     handlers.current.onFit?.({ scale, needed: fitNeeded });
@@ -320,15 +376,19 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
         srcDoc={srcDoc}
         sandbox={SANDBOX}
         allow="fullscreen; clipboard-write; autoplay"
-        onLoad={() => setLoaded(true)}
+        onLoad={() => {
+          setLoaded(true);
+          // Sin noticia del puente (no debería pasar) se muestra tal cual.
+          if (!readyRef.current) release();
+        }}
         style={scaled ? { width: fitWidth, height: `${100 / scale}%`, transform: `scale(${scale})` } : undefined}
         className={cn(
-          'border-0 transition-opacity duration-200',
+          'border-0 transition-opacity duration-150',
           scaled ? 'absolute left-0 top-0 max-w-none origin-top-left' : 'h-full w-full',
-          loaded ? 'opacity-100' : 'opacity-0',
+          loaded && !settling ? 'opacity-100' : 'opacity-0',
         )}
       />
-      {!loaded && (
+      {!shown && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center" role="status" aria-live="polite">
           <div className="w-48">
             <div className="h-1 overflow-hidden rounded-full bg-muted">

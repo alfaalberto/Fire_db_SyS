@@ -14,8 +14,8 @@
  *  - resuelve dentro del documento los enlaces "#ancla", que en un `srcdoc`
  *    cargarían la plataforma dentro del iframe;
  *  - convierte con KaTeX las fórmulas que la presentación dejó en crudo;
- *  - avisa cuando el contenido no cabe a lo ancho, para mostrarla reducida
- *    en lugar de recortada;
+ *  - mide cuánto sitio necesita, para que la app la muestre reducida si no
+ *    cabe a lo ancho o ampliada si deja márgenes vacíos;
  *  - reenvía Escape, los archivos soltados y los errores de ejecución.
  *
  * IMPORTANTE: esta función se convierte a texto con `toString()` y se ejecuta
@@ -220,6 +220,8 @@ export function slideBridgeRuntime() {
     var p = detect();
     var text = p ? p.index + '/' + p.total : '';
     if (!force && text === lastSent) return p;
+    // Otra lámina: puede necesitar otro tamaño.
+    if (pageLoaded && text !== lastSent) layoutSoon(90);
     lastSent = text;
     post({ t: 'progress', index: p ? p.index : null, total: p ? p.total : null });
     return p;
@@ -678,30 +680,44 @@ export function slideBridgeRuntime() {
   }
 
   /* ------------------------------------------------------------------ */
-  /* Ancho que necesita la presentación                                  */
+  /* Cuánto sitio necesita la presentación                               */
   /* ------------------------------------------------------------------ */
 
-  // Mide hasta dónde llega el contenido que la ventana corta por los lados:
-  // una barra de botones que no cabe, una tabla ancha. La app usa el dato para
-  // mostrar la presentación reducida en lugar de recortada. No cuenta lo que
-  // la presentación dejó fuera de la pantalla a propósito: adornos y paneles
-  // con posición absoluta o fija que sobresalen, lo que ya recorta uno de sus
-  // contenedores (carruseles) ni lo que no cabría ni reduciéndola.
+  // La app dibuja el iframe con otro ancho y lo escala cuando conviene:
+  // reducida si el contenido no cabe a lo ancho, ampliada si deja márgenes
+  // vacíos. Aquí solo se mide; qué hacer lo decide slide-fit.js. Se mide:
+  //  - hasta dónde llega lo que la ventana corta por los lados, separando las
+  //    cabeceras y pies (barras de botones) del contenido;
+  //  - si los botones de avanzar quedan cortados;
+  //  - cuánto alto ocuparía el contenido sin desplazarse;
+  //  - el ancho de la columna de contenido, cuando está centrada.
+  // No cuenta lo que la presentación dejó fuera de la pantalla a propósito:
+  // adornos y paneles con posición absoluta o fija que sobresalen, lo que ya
+  // recorta uno de sus contenedores (carruseles) ni lo que no cabría ni
+  // reduciéndola.
   var MIN_FIT = 0.6;
   var lastLayout = '';
   var layoutTimer = 0;
+  var SPAN_SKIP = /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|OPTION|BR|HR)$/;
+  var SPAN_WHOLE = /^(IMG|CANVAS|VIDEO|INPUT|SELECT|TEXTAREA|BUTTON|IFRAME|svg|math)$/i;
 
-  function boxInfo(node, memo, edge) {
+  function boxInfo(node, memo, edge, tall) {
     var known = memo ? memo.get(node) : null;
     if (known) return known;
     var cs = getComputedStyle(node);
     var box = node.getBoundingClientRect();
-    var placed = cs.position === 'absolute' || cs.position === 'fixed';
+    var position = cs.position;
+    var placed = position === 'absolute' || position === 'fixed';
+    // Franja: cabecera o pie. Ancha, baja y pegada arriba o abajo; o fija o
+    // pegajosa sin ser el armazón de toda la página.
+    var strip = box.width >= edge * 0.9 && box.height <= tall * 0.2 && (box.top <= tall * 0.12 || box.bottom >= tall * 0.88);
+    var pinned = (position === 'fixed' || position === 'sticky') && !(box.width >= edge * 0.6 && box.height >= tall * 0.6);
     known = {
       hidden: cs.visibility === 'hidden',
       // Transparente, o colocado a mano y sobresaliendo: adorno o panel oculto.
       gone: parseFloat(cs.opacity) < 0.05 || (placed && (box.right > edge + 2 || box.left < -2)),
       clips: cs.overflowX !== 'visible',
+      bar: strip || pinned,
       left: box.left,
       right: box.right
     };
@@ -709,59 +725,161 @@ export function slideBridgeRuntime() {
     return known;
   }
 
-  /** Ancho con el que `el` dejaría de estar cortado por la ventana; 0 si no lo está. */
-  function cutExtent(el, memo, edge) {
-    var own = boxInfo(el, memo, edge);
-    if (own.hidden || own.gone) return 0;
+  /**
+   * Tramo horizontal de `el` que se vería con una ventana sin límite: su caja
+   * recortada por los contenedores que recortan. `null` si no se ve. `bar`
+   * indica que está en una cabecera o un pie.
+   */
+  function visibleSpan(el, memo, edge, tall) {
+    var own = boxInfo(el, memo, edge, tall);
+    if (own.hidden || own.gone) return null;
     var left = own.left;
     var right = own.right;
+    var bar = own.bar;
     for (var node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
-      var info = boxInfo(node, memo, edge);
-      if (info.gone) return 0;
+      var info = boxInfo(node, memo, edge, tall);
+      if (info.gone) return null;
+      if (info.bar) bar = true;
       if (info.clips) {
         if (info.right < right) right = info.right;
         if (info.left > left) left = info.left;
       }
     }
-    var over = Math.max(0, right - edge) + Math.max(0, -left);
-    return over > 2 ? edge + over : 0;
+    if (right - left < 2) return null;
+    return { left: left, right: right, bar: bar };
   }
 
-  function neededWidth() {
+  function navCut(width) {
+    for (var dir = -1; dir <= 1; dir += 2) {
+      var button = findNavButton(dir);
+      if (!button) continue;
+      var rect = button.getBoundingClientRect();
+      if (rect.right > width + 2 || rect.left < -2) return true;
+    }
+    return false;
+  }
+
+  function hasOwnText(el) {
+    for (var node = el.firstChild; node; node = node.nextSibling) {
+      if (node.nodeType === 3 && /\S/.test(node.nodeValue)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Ancho de la columna que ocupa el contenido a la vista (textos, imágenes,
+   * gráficas, controles; sin cabeceras ni pies) cuando está centrada y deja
+   * margen a ambos lados. 0 si llena la ventana o no está centrada.
+   */
+  function contentColumn(all, count, memo, width, height, client) {
+    var left = Infinity;
+    var right = -Infinity;
+    var found = 0;
+    var skip = null;
+    for (var i = 0; i < count && found < 3000; i++) {
+      var el = all[i];
+      if (skip) {
+        if (skip.contains(el)) continue;
+        skip = null;
+      }
+      var tag = el.tagName;
+      if (SPAN_SKIP.test(tag)) { skip = el; continue; }
+      // Imágenes, gráficas, controles y fórmulas cuentan enteros.
+      if (SPAN_WHOLE.test(tag) || /(^|\s)katex(\s|$)/.test(className(el))) skip = el;
+      else if (!hasOwnText(el)) continue;
+      var rect = el.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) continue;
+      if (rect.bottom <= 0 || rect.top >= height || rect.right <= 0 || rect.left >= width) continue;
+      var span = visibleSpan(el, memo, width, height);
+      if (!span || span.bar) continue;
+      // Casi todo recortado: es la lámina vecina asomando, no contenido a la vista.
+      if (span.right - span.left < rect.width * 0.5) continue;
+      found += 1;
+      if (span.left < left) left = span.left;
+      if (span.right > right) right = span.right;
+    }
+    if (found < 3) return 0;
+    left = Math.max(0, left);
+    right = Math.min(client, right);
+    var gapLeft = left;
+    var gapRight = client - right;
+    var column = right - left;
+    if (column < client * 0.25 || gapLeft < client * 0.04 || gapRight < client * 0.04) return 0;
+    if (Math.abs(gapLeft - gapRight) > Math.max(24, client * 0.04)) return 0;
+    return Math.round(column);
+  }
+
+  function measureLayout() {
     // El borde es el de la ventana completa, no el del área sin la barra de
     // desplazamiento: un elemento de `100vw` siempre queda bajo esa barra y
     // agrandar la ventana no lo arregla.
     var width = window.innerWidth;
+    var height = window.innerHeight;
     var root = document.documentElement;
     var body = document.body;
-    if (!body || width < 40) return width;
-    if (Math.max(root.scrollWidth, body.scrollWidth) <= width + 8) return width;
+    var out = { width: width, height: height, need: width, main: width, nav: false, tall: height, col: 0 };
+    if (!body || width < 40 || height < 40) return out;
 
+    var client = root.clientWidth || width;
     var memo = typeof WeakMap === 'function' ? new WeakMap() : null;
-    var limit = width / MIN_FIT;
-    var need = width;
     var all = body.getElementsByTagName('*');
-    var checked = 0;
-    for (var i = 0; i < all.length && i < 8000 && checked < 400; i++) {
-      var el = all[i];
-      var rect = el.getBoundingClientRect();
-      if (rect.width < 2 || rect.height < 2) continue;
-      if (rect.right <= width + 2 && rect.left >= -2) continue;
-      // Enteramente fuera: solo cuenta si su contenedor empieza dentro (el
-      // resto de una fila de botones); si no, es un panel fuera de pantalla.
-      if (rect.left >= width - 2 || rect.right <= 2) {
-        var holder = el.parentElement;
-        if (!holder || holder === body) continue;
-        var around = holder.getBoundingClientRect();
-        if (around.left >= width - 2 || around.right <= 2) continue;
+    var count = Math.min(all.length, 9000);
+    var i;
+
+    // 1) Lo que la ventana corta por los lados.
+    if (Math.max(root.scrollWidth, body.scrollWidth) > width + 8) {
+      var limit = width / MIN_FIT;
+      var need = width;
+      var main = width;
+      var checked = 0;
+      for (i = 0; i < count && checked < 400; i++) {
+        var el = all[i];
+        var rect = el.getBoundingClientRect();
+        if (rect.width < 2 || rect.height < 2) continue;
+        if (rect.right <= width + 2 && rect.left >= -2) continue;
+        // Enteramente fuera: solo cuenta si su contenedor empieza dentro (el
+        // resto de una fila de botones); si no, es un panel fuera de pantalla.
+        if (rect.left >= width - 2 || rect.right <= 2) {
+          var holder = el.parentElement;
+          if (!holder || holder === body) continue;
+          var around = holder.getBoundingClientRect();
+          if (around.left >= width - 2 || around.right <= 2) continue;
+        }
+        checked += 1;
+        var span = visibleSpan(el, memo, width, height);
+        if (!span) continue;
+        var over = Math.max(0, span.right - width) + Math.max(0, -span.left);
+        if (over <= 2 || width + over > limit) continue;
+        if (width + over > need) need = width + over;
+        if (!span.bar && width + over > main) main = width + over;
       }
-      checked += 1;
-      var extent = cutExtent(el, memo, width);
-      if (extent > need && extent <= limit) need = extent;
+      if (need > width + 2) {
+        // Para que quepa junto a la barra de desplazamiento vertical.
+        var gutter = Math.max(0, width - client);
+        out.need = Math.ceil(need + gutter);
+        if (main > width + 2) out.main = Math.ceil(main + gutter);
+        out.nav = navCut(width);
+      }
     }
-    if (need <= width + 2) return width;
-    // Para que el contenido quepa junto a la barra de desplazamiento vertical.
-    return Math.ceil(need + Math.max(0, width - (root.clientWidth || width)));
+
+    // 2) Alto que ocuparía el contenido sin desplazarse: el de la página más
+    //    lo que guardan sus paneles con desplazamiento propio.
+    var extra = Math.max(0, Math.max(root.scrollHeight, body.scrollHeight) - height);
+    var panels = 0;
+    for (i = 0; i < count && panels < 8; i++) {
+      var panel = all[i];
+      var room = panel.clientHeight;
+      if (room < height * 0.3 || panel.scrollHeight <= room + 8) continue;
+      var flow = getComputedStyle(panel).overflowY;
+      if (flow !== 'auto' && flow !== 'scroll') continue;
+      extra += panel.scrollHeight - room;
+      panels += 1;
+    }
+    out.tall = Math.round(height + extra);
+
+    // 3) Columna de contenido: solo interesa si nada se corta.
+    if (out.need <= width + 2) out.col = contentColumn(all, count, memo, width, height, client);
+    return out;
   }
 
   // El ancho se mide con las tipografías ya cargadas: con las de reserva el
@@ -782,12 +900,11 @@ export function slideBridgeRuntime() {
 
   function reportLayout() {
     layoutTimer = 0;
-    var width = window.innerWidth;
-    var need = neededWidth();
-    var text = need + '/' + width;
+    var m = measureLayout();
+    var text = [m.width, m.height, m.need, m.main, m.nav ? 1 : 0, m.tall, m.col].join('/');
     if (text === lastLayout) return;
     lastLayout = text;
-    post({ t: 'layout', need: need, width: width });
+    post({ t: 'layout', width: m.width, height: m.height, need: m.need, main: m.main, nav: m.nav, tall: m.tall, col: m.col });
   }
 
   function layoutSoon(delay) {

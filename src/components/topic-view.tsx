@@ -61,7 +61,7 @@ interface TopicViewProps {
 const DeckEditor = dynamic(() => import('./admin/deck-editor').then((mod) => mod.DeckEditor), { ssr: false });
 
 const LAST_KEY = 'sys.ultimo';
-/** "0" si el lector prefiere ver las presentaciones a su tamaño natural. */
+/** "0" si el lector prefiere ver las presentaciones siempre a su tamaño natural. */
 const FIT_KEY = 'sys.ajuste';
 const NO_FIT: FitState = { scale: 1, needed: false };
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -344,8 +344,8 @@ export function TopicView({
     }
     if (fitState.scale < 0.995) {
       list.push({ key: 'scale', message: `No cabe a lo ancho en esta ventana: se muestra reducida al ${Math.round(fitState.scale * 100)} %.` });
-    } else if (fitState.needed) {
-      list.push({ key: 'scale', message: 'No cabe a lo ancho en esta ventana y el ajuste está desactivado: parte del contenido queda fuera.' });
+    } else if (fitState.scale > 1.005) {
+      list.push({ key: 'scale', message: `Deja márgenes vacíos en esta ventana: se muestra ampliada al ${Math.round(fitState.scale * 100)} %.` });
     }
     return list;
   }, [activeReport, editMode, fitState, mathRescued]);
@@ -582,7 +582,7 @@ export function TopicView({
               {fitState.needed && (
                 <DropdownMenuItem onSelect={toggleFit}>
                   {fitOn ? <Maximize2 className="mr-2 h-4 w-4" /> : <Minimize2 className="mr-2 h-4 w-4" />}
-                  {fitOn ? `Ver a tamaño real (ahora al ${Math.round(fitState.scale * 100)} %)` : 'Ajustar al ancho de la pantalla'}
+                  {fitOn ? `Ver a tamaño real (ahora al ${Math.round(fitState.scale * 100)} %)` : 'Ajustar a la pantalla'}
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem disabled={html === null} onSelect={() => html !== null && downloadDeck(html, deckTitle ?? item!.title)}>

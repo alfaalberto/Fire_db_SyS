@@ -211,6 +211,84 @@ export const fullWidthBand = page(
   `<div class="band"><h1 data-testid="heading">Franja completa</h1></div><div class="tall"></div>`,
 );
 
+const columnCss = `<style>
+  body{padding:0}
+  main{max-width:760px;margin:0 auto;padding:24px 0}
+  .block{height:380px;background:#e0e7ff;border-radius:12px}
+  .slide{display:none}.slide.active{display:block}
+</style>`;
+
+const paragraphs = (count: number) =>
+  Array.from({ length: count }, (_, i) => `<p>Párrafo ${i + 1} de una columna centrada que deja márgenes a los lados.</p>`).join('\n');
+
+/** Página larga en una columna estrecha: se amplía hasta llenar el ancho. */
+export const narrowPage = page(
+  'Tamaño · columna estrecha',
+  columnCss,
+  `<main><h1 data-testid="heading">Columna estrecha</h1>
+${paragraphs(40)}
+</main>`,
+);
+
+/** Lámina corta en una columna estrecha: ampliada sigue cabiendo. */
+export const narrowSlide = page(
+  'Tamaño · lámina corta',
+  columnCss,
+  `<main><h1 data-testid="heading">Lámina corta</h1>
+${paragraphs(3)}
+</main>`,
+);
+
+/** Lámina que casi llena el alto: solo admite ampliarse un poco. */
+export const tightSlide = page(
+  'Tamaño · lámina justa',
+  columnCss,
+  `<main><h1 data-testid="heading">Lámina justa</h1><p>Una figura ocupa casi todo el alto.</p><div class="block"></div><p>Pie de la lámina.</p></main>`,
+);
+
+/** Dos láminas: una corta y una justa. La ampliación baja al llegar a la justa y ya no sube. */
+export const twoSizes = page(
+  'Tamaño · láminas distintas',
+  columnCss,
+  `<main>
+  <section class="slide active"><h1 data-testid="heading">Corta</h1>${paragraphs(2)}</section>
+  <section class="slide"><h1 data-testid="heading">Justa</h1><div class="block"></div><p>Pie de la lámina.</p></section>
+  <p><button id="btn-prev">Anterior</button> <button id="btn-next">Siguiente</button></p>
+</main>
+<script>
+  var slides = [].slice.call(document.querySelectorAll('.slide'));
+  var at = 0;
+  function go(i) { if (i < 0 || i >= slides.length) return; at = i; slides.forEach(function (s, k) { s.classList.toggle('active', k === at); }); }
+  document.getElementById('btn-next').onclick = function () { go(at + 1); };
+  document.getElementById('btn-prev').onclick = function () { go(at - 1); };
+</script>`,
+);
+
+const headerCss = `<style>
+  body{padding:0;overflow-x:hidden}
+  header{display:flex;gap:10px;padding:10px;white-space:nowrap}
+  header button{flex:0 0 120px;height:36px}
+  main{padding:24px}
+</style>`;
+
+const options = Array.from({ length: 11 }, (_, i) => `<button>Opción ${i + 1}</button>`).join('');
+
+/** Cabecera con muchos botones secundarios: en el escritorio no justifica achicar todo. */
+export const wideHeader = page(
+  'Tamaño · cabecera larga',
+  headerCss,
+  `<header>${options}<button>Auditar</button></header>
+<main><h1 data-testid="heading">Cabecera larga</h1><p>El contenido cabe; solo la barra se sale.</p></main>`,
+);
+
+/** La misma cabecera, pero lo que queda fuera es el botón de avanzar. */
+export const wideHeaderNav = page(
+  'Tamaño · cabecera con avance',
+  headerCss,
+  `<header>${options}<button id="btn-next">Siguiente</button></header>
+<main><h1 data-testid="heading">Avance cortado</h1><p>Sin reducirla no se podría avanzar.</p></main>`,
+);
+
 /** Laboratorio de una sola página: su botón «siguiente» avanza la muestra, no una lámina. */
 export const labPage = page(
   'Laboratorio · una sola página',
@@ -271,6 +349,7 @@ export const labCourse: SeedChapter[] = [
     topics: [
       { id: 'lab-formulas', title: '1.1 Fórmulas', decks: [mathOverEscaped, mathWithoutLibrary, mathInsertedLater, mathCorrect, mathUnbalanced, mathLate, mathMacros] },
       { id: 'lab-ancho', title: '1.2 Ancho', decks: [wideToolbar, decoration, sideBySide, viewportRelative, fullWidthBand] },
+      { id: 'lab-tamano', title: '1.4 Tamaño', decks: [narrowPage, narrowSlide, tightSlide, twoSizes, wideHeader, wideHeaderNav] },
       { id: 'lab-unica', title: '1.3 Páginas únicas', decks: [labPage, labKeys, rerendered, closing] },
     ],
   },
