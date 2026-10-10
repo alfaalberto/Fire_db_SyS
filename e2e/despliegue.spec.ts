@@ -254,6 +254,81 @@ test.describe('presentaciones que dejan márgenes vacíos', () => {
   });
 });
 
+test.describe('ampliar sin estropear la presentación', () => {
+  const frame = (page: Page) => page.locator('main iframe');
+  const scaleOf = (page: Page) =>
+    frame(page).evaluate((el) => {
+      const value = getComputedStyle(el).transform;
+      return value === 'none' ? 1 : Number(value.slice(7).split(',')[0]);
+    });
+  /** Dentro de la presentación: ¿cabe `selector` entero en la ventana? */
+  const insideWindow = (page: Page, selector: string) =>
+    deck(page)
+      .locator(selector)
+      .evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        return box.top >= 0 && box.bottom <= window.innerHeight + 1 && box.left >= 0 && box.right <= window.innerWidth + 1;
+      });
+
+  test('un escenario de tamaño fijo se amplía y sus láminas largas no le quitan la ampliación', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-escenario/1');
+    await expectHeading(page, 'Portada');
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.4/);
+    // Escenario, cabecera y pie siguen a la vista.
+    expect(await insideWindow(page, '.stage')).toBe(true);
+    expect(await insideWindow(page, '#btn-next')).toBe(true);
+
+    // La segunda lámina se desplaza por dentro del escenario, ampliada o no.
+    await deck(page).getByRole('button', { name: 'Siguiente' }).click();
+    await expectHeading(page, 'Lámina larga');
+    await page.waitForTimeout(1200);
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.4/);
+  });
+
+  test('también cuando ya la primera lámina se desplaza por dentro', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-escenario/2');
+    await expectHeading(page, 'Casi cabe');
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.4/);
+    expect(await insideWindow(page, '.stage')).toBe(true);
+  });
+
+  test('no cruza el punto de corte en el que la presentación pasa a su diseño de tableta', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-escenario/3');
+    await expectHeading(page, 'Con punto de corte');
+    // Llenar el ancho pediría 134 %; el diseño cambia por debajo de 901 px.
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.1[78]/);
+    const mode = await deck(page)
+      .locator('#mode')
+      .evaluate((el) => getComputedStyle(el, '::after').content);
+    expect(mode).toBe('"escritorio"');
+  });
+
+  test('ni el que consulta su código con matchMedia', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-escenario/4');
+    await expectHeading(page, 'Corte en el código');
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.1[01]/);
+    await expect(deck(page).locator('#mode')).toHaveText('escritorio');
+  });
+
+  test('si el escenario recorta lo que no cabe, amplía solo hasta donde no se pierde nada', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-escenario/5');
+    await expectHeading(page, 'Escenario que recorta');
+    await expect.poll(() => scaleOf(page)).toBeGreaterThan(1.05);
+    await page.waitForTimeout(900);
+    const scale = await scaleOf(page);
+    expect(scale).toBeGreaterThan(1.05);
+    expect(scale).toBeLessThan(1.3);
+    expect(await insideWindow(page, '#last')).toBe(true);
+  });
+
+  test('una columna que mide según la ventana se queda a su tamaño', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-escenario/6');
+    await expectHeading(page, 'Columna en vw');
+    await page.waitForTimeout(1800);
+    await expect(frame(page)).toHaveCSS('transform', 'none');
+  });
+});
+
 test.describe('páginas sin láminas en modo presentación', () => {
   test('la flecha lleva a la siguiente presentación, o a la siguiente lámina si la página responde', async ({ page }) => {
     await openApp(page, lab(), '#/t/lab-unica/1');

@@ -211,6 +211,15 @@ export const fullWidthBand = page(
   `<div class="band"><h1 data-testid="heading">Franja completa</h1></div><div class="tall"></div>`,
 );
 
+/** Dos o más `.slide`, una activa, con botones Anterior y Siguiente. */
+const toggleScript = `<script>
+  var slides = [].slice.call(document.querySelectorAll('.slide'));
+  var at = 0;
+  function go(i) { if (i < 0 || i >= slides.length) return; at = i; slides.forEach(function (s, k) { s.classList.toggle('active', k === at); }); }
+  document.getElementById('btn-next').onclick = function () { go(at + 1); };
+  document.getElementById('btn-prev').onclick = function () { go(at - 1); };
+</script>`;
+
 const columnCss = `<style>
   body{padding:0}
   main{max-width:760px;margin:0 auto;padding:24px 0}
@@ -255,13 +264,7 @@ export const twoSizes = page(
   <section class="slide"><h1 data-testid="heading">Justa</h1><div class="block"></div><p>Pie de la lámina.</p></section>
   <p><button id="btn-prev">Anterior</button> <button id="btn-next">Siguiente</button></p>
 </main>
-<script>
-  var slides = [].slice.call(document.querySelectorAll('.slide'));
-  var at = 0;
-  function go(i) { if (i < 0 || i >= slides.length) return; at = i; slides.forEach(function (s, k) { s.classList.toggle('active', k === at); }); }
-  document.getElementById('btn-next').onclick = function () { go(at + 1); };
-  document.getElementById('btn-prev').onclick = function () { go(at - 1); };
-</script>`,
+${toggleScript}`,
 );
 
 const headerCss = `<style>
@@ -287,6 +290,94 @@ export const wideHeaderNav = page(
   headerCss,
   `<header>${options}<button id="btn-next">Siguiente</button></header>
 <main><h1 data-testid="heading">Avance cortado</h1><p>Sin reducirla no se podría avanzar.</p></main>`,
+);
+
+const stageCss = `<style>
+  html,body{height:100%}
+  body{padding:0;display:flex;flex-direction:column;align-items:center}
+  header,footer{flex:0 0 40px;width:100%;display:flex;align-items:center;justify-content:center;gap:8px}
+  .stage{position:relative;width:100%;max-width:760px;height:420px;margin:auto;overflow:hidden;background:#eef2ff}
+  .slide{position:absolute;inset:0;padding:16px;overflow-y:auto;visibility:hidden;opacity:0}
+  .slide.active{visibility:visible;opacity:1}
+  .slide h1{margin:0;height:40px;font-size:28px}
+  .slide p{margin:0;height:24px}
+</style>`;
+
+const stageSlide = (title: string, filler: number) =>
+  `<h1 data-testid="heading">${title}</h1><p>Primera línea de la lámina.</p><p>Segunda línea de la lámina.</p><div style="height:${filler}px"></div>`;
+
+const stageDeck = (title: string, first: string, second: string) =>
+  page(
+    title,
+    stageCss,
+    `<header>Escenario de tamaño fijo</header>
+<div class="stage">
+  <section class="slide active">${first}</section>
+  <section class="slide">${second}</section>
+</div>
+<footer><button id="btn-prev">Anterior</button><button id="btn-next">Siguiente</button></footer>
+${toggleScript}`,
+  );
+
+/**
+ * Escenario de 760 × 420 centrado, como las presentaciones de tamaño fijo del
+ * curso: se amplía hasta donde cabe a lo alto. Su segunda lámina se desplaza
+ * por dentro, igual ampliada que sin ampliar; eso no debe quitarle la ampliación.
+ */
+export const fixedStage = stageDeck('Tamaño · escenario fijo', stageSlide('Portada', 100), stageSlide('Lámina larga', 700));
+
+/** El mismo escenario, pero ya la primera lámina se desplaza un poco por dentro. */
+export const fixedStageTight = stageDeck('Tamaño · escenario fijo y justo', stageSlide('Casi cabe', 340), stageSlide('Otra', 100));
+
+/** Columna estrecha con un diseño de tableta por debajo de 900 px: no debe cruzarlo. */
+export const withBreakpoint = page(
+  'Tamaño · punto de corte',
+  `<style>
+  body{padding:0}
+  main{max-width:760px;margin:0 auto;padding:24px 0}
+  #mode::after{content:"escritorio"}
+  @media (max-width: 900px){ #mode::after{content:"tableta"} main{max-width:none;padding:24px} }
+</style>`,
+  `<main><h1 data-testid="heading">Con punto de corte</h1><p>Diseño: <span id="mode"></span></p>
+${paragraphs(30)}
+</main>`,
+);
+
+/** Lo mismo, pero el punto de corte lo consulta su código con matchMedia. */
+export const withScriptBreakpoint = page(
+  'Tamaño · punto de corte en el código',
+  columnCss,
+  `<main><h1 data-testid="heading">Corte en el código</h1><p>Diseño: <span id="mode"></span></p>
+${paragraphs(30)}
+</main>
+<script>
+  var compact = window.matchMedia('(max-width: 960px)');
+  function apply() { document.getElementById('mode').textContent = compact.matches ? 'tableta' : 'escritorio'; }
+  apply();
+  window.addEventListener('resize', apply);
+</script>`,
+);
+
+/** Escenario del alto de la ventana que recorta lo que no cabe: ampliada no debe perder la última línea. */
+export const clippedStage = page(
+  'Tamaño · escenario que recorta',
+  `<style>
+  html,body{height:100%}
+  body{padding:0;overflow:hidden}
+  .stage{height:100vh;overflow:hidden;display:flex;flex-direction:column;align-items:center}
+  .content{width:100%;max-width:760px}
+  .block{height:400px;background:#e0e7ff;border-radius:12px}
+</style>`,
+  `<div class="stage"><div class="content"><h1 data-testid="heading">Escenario que recorta</h1><p>Una figura ocupa casi todo el alto.</p><div class="block"></div><p id="last">Última línea.</p></div></div>`,
+);
+
+/** Columna que mide según la ventana: ampliar no la acerca a los bordes. */
+export const viewportColumn = page(
+  'Tamaño · columna en vw',
+  `<style>body{padding:0} main{width:60vw;margin:0 auto;padding:24px 0}</style>`,
+  `<main><h1 data-testid="heading">Columna en vw</h1>
+${paragraphs(30)}
+</main>`,
 );
 
 /** Laboratorio de una sola página: su botón «siguiente» avanza la muestra, no una lámina. */
@@ -350,6 +441,7 @@ export const labCourse: SeedChapter[] = [
       { id: 'lab-formulas', title: '1.1 Fórmulas', decks: [mathOverEscaped, mathWithoutLibrary, mathInsertedLater, mathCorrect, mathUnbalanced, mathLate, mathMacros] },
       { id: 'lab-ancho', title: '1.2 Ancho', decks: [wideToolbar, decoration, sideBySide, viewportRelative, fullWidthBand] },
       { id: 'lab-tamano', title: '1.4 Tamaño', decks: [narrowPage, narrowSlide, tightSlide, twoSizes, wideHeader, wideHeaderNav] },
+      { id: 'lab-escenario', title: '1.5 Escenarios y cortes', decks: [fixedStage, fixedStageTight, withBreakpoint, withScriptBreakpoint, clippedStage, viewportColumn] },
       { id: 'lab-unica', title: '1.3 Páginas únicas', decks: [labPage, labKeys, rerendered, closing] },
     ],
   },

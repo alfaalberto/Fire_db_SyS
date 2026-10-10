@@ -4,8 +4,10 @@
  * El iframe puede dibujarse con un ancho distinto del disponible y escalarse
  * después para ocupar su sitio: más ancho y reducido cuando el contenido no
  * cabe (un teléfono), o más estrecho y ampliado cuando la presentación deja
- * márgenes vacíos a los lados (un proyector). Aquí se decide ese ancho a
- * partir de lo que mide el puente dentro de la presentación.
+ * márgenes vacíos a los lados (un proyector). Ampliar así equivale al zoom del
+ * navegador: la presentación se acomoda a una ventana más pequeña y se ve más
+ * grande. Aquí se decide ese ancho a partir de lo que mide el puente dentro de
+ * la presentación.
  *
  * Reglas:
  *  - El contenido cortado manda: se reduce hasta que quepa (mínimo 60 %).
@@ -14,8 +16,10 @@
  *    de avanzar; achicar toda la presentación por un botón secundario no
  *    compensa.
  *  - Si la columna de contenido es más estrecha que la ventana, se amplía
- *    hasta llenarla (máximo 150 %), pero una lámina que cabía en la pantalla
- *    tiene que seguir cabiendo: si deja de hacerlo se amplía menos.
+ *    hasta llenarla (máximo 150 %), sin cruzar los puntos de corte de la
+ *    presentación: no debe pasar a su diseño de tableta.
+ *  - Una lámina que cabía en la pantalla tiene que seguir cabiendo: si deja de
+ *    hacerlo se amplía menos. Una que ya necesitaba desplazarse no limita.
  *  - Dentro de una misma presentación la ampliación solo baja, nunca sube:
  *    así el tamaño no salta de lámina en lámina.
  *
@@ -32,7 +36,10 @@
  * @property {number} main    Lo mismo, sin contar cabeceras ni pies.
  * @property {boolean} nav    Los botones de avanzar o retroceder quedan cortados.
  * @property {number} tall    Alto que ocuparía el contenido sin desplazarse.
+ * @property {number} [soft]  Parte de `tall` que aportan paneles de los que aún no se sabe si dependen de la ventana.
+ * @property {number} [clip]  Alto que recortan, sin poder desplazarse, los contenedores a la vista.
  * @property {number} col     Ancho de la columna de contenido si está centrada y deja márgenes; 0 si no.
+ * @property {number} [floor] Ancho por debajo del cual la presentación cambiaría de diseño; 0 si no hay.
  */
 
 /**
@@ -43,6 +50,8 @@
  * @property {boolean} gaveUp  Reducir no sirvió: se deja a su tamaño.
  * @property {number} zooms    Ampliaciones probadas.
  * @property {number} ceiling  Ampliación máxima que admite lo visto hasta ahora.
+ * @property {number} clip     Lo que ya se recortaba antes de ampliar (adornos).
+ * @property {{ col: number, width: number } | null} probe  Columna y ancho previos a una ampliación aún sin comprobar.
  */
 
 export const FIT = Object.freeze({
@@ -70,9 +79,13 @@ export const FIT = Object.freeze({
   SLACK: 6,
 });
 
-/** @returns {FitMemory} */
-export function createFit() {
-  return { width: null, steps: 0, over: 0, gaveUp: false, zooms: 0, ceiling: FIT.MAX_ZOOM };
+/**
+ * @param {number} [ceiling]  Ampliación máxima ya conocida para esta presentación.
+ * @returns {FitMemory}
+ */
+export function createFit(ceiling) {
+  const top = ceiling > 0 ? Math.min(FIT.MAX_ZOOM, ceiling) : FIT.MAX_ZOOM;
+  return { width: null, steps: 0, over: 0, gaveUp: false, zooms: 0, ceiling: top, clip: 0, probe: null };
 }
 
 /** Escala con la que se ve la presentación (1 = tamaño natural). */
@@ -101,15 +114,35 @@ export function nextFit(memory, report, box) {
   const next = { ...memory };
   const zoomed = current < box.w - 1;
   const shrunk = current > box.w + 1;
+  const cut = report.need > report.width * FIT.TOLERANCE;
+
+  /* ---------------- ampliada: ¿sigue valiendo? ---------------- */
+  if (zoomed) {
+    next.probe = null;
+    let ceiling = memory.ceiling;
+    const probe = memory.probe;
+    if (probe && report.col > 0 && report.col <= probe.col * (report.width / probe.width) * 1.05) {
+      // La columna encogió con la ventana (mide en `vw`): ampliar no la acerca
+      // a los bordes. Se deja a su tamaño.
+      ceiling = 1;
+    }
+    // La ampliación dejó algo fuera a lo ancho: se amplía solo lo que admite.
+    if (cut) ceiling = Math.min(ceiling, box.w / report.need);
+    if (box.h > 0 && report.tall > 0) {
+      // Lo que ahora se recorta y antes no también es alto que falta.
+      const tall = report.tall + Math.max(0, (report.clip || 0) - memory.clip);
+      // Cabía (o casi) a tamaño natural y, ampliada, ya no: hasta donde quepa.
+      if (tall <= box.h * FIT.NEAR_FIT && tall > report.height + FIT.SLACK) ceiling = Math.min(ceiling, (box.h / tall) * 0.995);
+    }
+    if (ceiling < memory.ceiling) {
+      next.ceiling = ceiling;
+      next.width = widthForZoom(ceiling, box.w);
+    }
+    return { memory: next, width: next.width };
+  }
 
   /* ---------------- algo queda cortado a lo ancho ---------------- */
-  if (report.need > report.width * FIT.TOLERANCE) {
-    if (zoomed) {
-      // La ampliación dejó algo fuera: se amplía solo lo que admite.
-      next.ceiling = Math.min(next.ceiling, box.w / report.need);
-      next.width = widthForZoom(next.ceiling, box.w);
-      return { memory: next, width: next.width };
-    }
+  if (cut) {
     if (memory.gaveUp) return same;
 
     const contentCut = report.main > report.width * FIT.TOLERANCE;
@@ -136,26 +169,20 @@ export function nextFit(memory, report, box) {
 
   /* ---------------- todo cabe: ¿se puede ampliar? ---------------- */
   if (shrunk || !(box.h > 0) || !(report.tall > 0)) return same;
-  // ¿Esta lámina cabe (o casi) en la pantalla a tamaño natural?
-  const fitsLike = report.tall <= box.h * FIT.NEAR_FIT;
-
-  if (zoomed) {
-    if (fitsLike && report.tall > report.height + FIT.SLACK) {
-      // Cabía y, ampliada, ya no: se amplía hasta donde cabe.
-      next.ceiling = Math.min(next.ceiling, (box.h / report.tall) * 0.995);
-      next.width = widthForZoom(next.ceiling, box.w);
-      return { memory: next, width: next.width };
-    }
-    return same;
-  }
-
   if (!(report.col > 0) || memory.zooms >= FIT.MAX_STEPS) return same;
-  // Ya rebasa un poco la pantalla: ampliarla lo empeoraría.
-  if (fitsLike && report.tall > box.h + FIT.SLACK) return same;
-  const zoom = Math.min(memory.ceiling, (FIT.FILL * box.w) / report.col);
+  // Ya rebasa un poco la pantalla: ampliarla lo empeoraría. Lo que aportan los
+  // paneles aún sin clasificar no cuenta todavía: puede no depender de la
+  // ventana, y eso solo se sabe probando.
+  const firm = report.tall - (report.soft || 0);
+  if (firm <= box.h * FIT.NEAR_FIT && firm > box.h + FIT.SLACK) return same;
+  let zoom = Math.min(memory.ceiling, (FIT.FILL * box.w) / report.col);
+  // Sin cruzar un punto de corte del diseño de la presentación.
+  if (report.floor > 0) zoom = Math.min(zoom, box.w / report.floor);
   const wanted = widthForZoom(zoom, box.w);
   if (wanted === null) return same;
   next.width = wanted;
   next.zooms = memory.zooms + 1;
+  next.clip = report.clip || 0;
+  next.probe = { col: report.col, width: report.width };
   return { memory: next, width: wanted };
 }

@@ -242,7 +242,10 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
         main?: number;
         nav?: boolean;
         tall?: number;
+        soft?: number;
+        clip?: number;
         col?: number;
+        floor?: number;
         count?: number;
       } | null;
       if (!data || data.__sys !== tokenRef.current) return;
@@ -294,7 +297,10 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
             main: Number(data.main) || need,
             nav: data.nav === true,
             tall: Number(data.tall) || 0,
+            soft: Number(data.soft) || 0,
+            clip: Number(data.clip) || 0,
             col: Number(data.col) || 0,
+            floor: Number(data.floor) || 0,
           };
           if (!state.enabled) {
             // Ajuste desactivado: solo se anota si haría falta.

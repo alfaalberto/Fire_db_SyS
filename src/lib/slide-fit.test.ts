@@ -132,4 +132,92 @@ describe('ampliar lo que deja márgenes', () => {
     const memory = { ...createFit(), width: 571, steps: 1, over: 181 };
     expect(nextFit(memory, report(571, 1113, { col: 300, tall: 3000 }), phone).width).toBe(571);
   });
+
+  it('parte del techo que ya se conocía para la presentación', () => {
+    const out = nextFit(createFit(1.2), report(1920, 1080, { col: 1070 }), desktop);
+    expect(out.width).toBe(1600);
+    // Si el techo conocido ya no deja ampliar, ni lo intenta.
+    expect(nextFit(createFit(1), report(1920, 1080, { col: 1070 }), desktop).width).toBeNull();
+  });
+});
+
+describe('puntos de corte del diseño', () => {
+  it('no amplía más allá del ancho en el que la presentación cambia de diseño', () => {
+    // Con columna de 1070 px pediría 1280; el diseño cambia por debajo de 1537.
+    const out = nextFit(createFit(), report(1920, 1080, { col: 1070, floor: 1537 }), desktop);
+    expect(out.width).toBe(1537);
+  });
+
+  it('si el punto de corte no deja margen, no amplía', () => {
+    // Ventana de 1062 px y diseño de tableta por debajo de 1025.
+    expect(nextFit(createFit(), report(1062, 600, { col: 760, floor: 1025 }), { w: 1062, h: 600 }).width).toBeNull();
+  });
+
+  it('un punto de corte lejano no estorba', () => {
+    const out = nextFit(createFit(), report(1920, 1080, { col: 1070, floor: 901 }), desktop);
+    expect(out.width).toBe(1280);
+  });
+});
+
+describe('escenarios de tamaño fijo y paneles con desplazamiento propio', () => {
+  it('lo que sobra en un panel aún sin clasificar no impide probar', () => {
+    // Rebasa 98 px, pero dentro de un panel que puede no depender de la ventana.
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1280, tall: 1178, soft: 98 }), desktop);
+    expect(first.width).toBe(1333);
+    // Ampliada, el puente ya sabe que es de tamaño fijo y no lo cuenta: se queda.
+    const second = nextFit(first.memory, report(1333, 750, { tall: 750 }), desktop);
+    expect(second.width).toBe(1333);
+  });
+
+  it('si resulta que sí dependía de la ventana, vuelve a su tamaño', () => {
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1280, tall: 1140, soft: 60 }), desktop);
+    const second = nextFit(first.memory, report(first.width!, 750, { tall: 1160 }), desktop);
+    expect(second.width).toBeNull();
+  });
+
+  it('lo que rebasa de verdad sí impide ampliar', () => {
+    expect(nextFit(createFit(), report(1920, 1080, { col: 1280, tall: 1178, soft: 40 }), desktop).width).toBeNull();
+  });
+
+  it('en un solo paso atiende lo que se corta a lo ancho y lo que no cabe a lo alto', () => {
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1280 }), desktop);
+    // A 1333 px se corta la cabecera (pide 1424) y la página necesita 891 px de alto.
+    const second = nextFit(first.memory, report(1333, 750, { need: 1424, main: 1333, tall: 891 }), desktop);
+    const scale = scaleOf(second.width, desktop.w);
+    expect(scale).toBeCloseTo((1080 / 891) * 0.995, 2);
+    expect(second.width!).toBeGreaterThanOrEqual(1424);
+  });
+});
+
+describe('contenido que se recorta sin poder desplazarse', () => {
+  it('lo que ya se recortaba antes de ampliar (un adorno) no cuenta', () => {
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1280, clip: 120 }), desktop);
+    const second = nextFit(first.memory, report(first.width!, 750, { clip: 120 }), desktop);
+    expect(second.width).toBe(first.width);
+  });
+
+  it('si al ampliar se recorta más, amplía menos', () => {
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1280 }), desktop);
+    const second = nextFit(first.memory, report(first.width!, 750, { clip: 90 }), desktop);
+    const scale = scaleOf(second.width, desktop.w);
+    expect(scale).toBeLessThan(1.44);
+    expect(1080 / scale).toBeGreaterThanOrEqual(750 + 90);
+  });
+});
+
+describe('columnas que miden según la ventana', () => {
+  it('si la columna encoge con la ventana, ampliar no sirve: vuelve a su tamaño y no insiste', () => {
+    // 60vw: 1152 px con 1920 de ventana, 768 px con 1280.
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1152, tall: 2400 }), desktop);
+    expect(first.width).toBe(1280);
+    const second = nextFit(first.memory, report(1280, 720, { col: 768, tall: 2400 }), desktop);
+    expect(second.width).toBeNull();
+    expect(nextFit(second.memory, report(1920, 1080, { col: 1152, tall: 2400 }), desktop).width).toBeNull();
+  });
+
+  it('una columna de ancho fijo que sigue dejando algo de margen se queda ampliada', () => {
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1070, tall: 2400 }), desktop);
+    const second = nextFit(first.memory, report(first.width!, 720, { col: 1070, tall: 2400 }), desktop);
+    expect(second.width).toBe(first.width);
+  });
 });
