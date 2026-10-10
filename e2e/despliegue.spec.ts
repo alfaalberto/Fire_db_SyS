@@ -211,22 +211,25 @@ test.describe('presentaciones que dejan márgenes vacíos', () => {
     expect(await fitsInHeight(page)).toBe(true);
   });
 
-  test('la ampliación baja al llegar a una lámina más alta y ya no vuelve a subir', async ({ page }) => {
+  test('el tamaño es uno para toda la presentación: manda su lámina más alta', async ({ page }) => {
     await openApp(page, lab(), '#/t/lab-tamano/4');
     await expectHeading(page, 'Corta');
-    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.3[34]/);
+    // La portada sola admitiría 134 %; la segunda lámina, más alta, no.
+    await expect.poll(() => scaleOf(page)).toBeGreaterThan(1.05);
+    await page.waitForTimeout(900);
+    const opened = await scaleOf(page);
+    expect(opened).toBeLessThan(1.3);
 
     await deck(page).getByRole('button', { name: 'Siguiente' }).click();
     await expectHeading(page, 'Justa');
-    await expect.poll(() => scaleOf(page)).toBeLessThan(1.3);
     await page.waitForTimeout(900);
-    const tight = await scaleOf(page);
+    expect(await scaleOf(page)).toBeCloseTo(opened, 2);
     expect(await fitsInHeight(page)).toBe(true);
 
     await deck(page).getByRole('button', { name: 'Anterior' }).click();
     await expectHeading(page, 'Corta');
     await page.waitForTimeout(900);
-    expect(await scaleOf(page)).toBeCloseTo(tight, 2);
+    expect(await scaleOf(page)).toBeCloseTo(opened, 2);
   });
 
   test('el lector puede volver al tamaño real', async ({ page }) => {
@@ -326,6 +329,57 @@ test.describe('ampliar sin estropear la presentación', () => {
     await expectHeading(page, 'Columna en vw');
     await page.waitForTimeout(1800);
     await expect(frame(page)).toHaveCSS('transform', 'none');
+  });
+});
+
+test.describe('el tamaño se decide para la presentación entera', () => {
+  const frame = (page: Page) => page.locator('main iframe');
+  const scaleOf = (page: Page) =>
+    frame(page).evaluate((el) => {
+      const value = getComputedStyle(el).transform;
+      return value === 'none' ? 1 : Number(value.slice(7).split(',')[0]);
+    });
+
+  test('no amplía la portada si las demás láminas ya llenan la pantalla', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-conjunto/1');
+    await expectHeading(page, 'Portada');
+    await page.waitForTimeout(1800);
+    await expect(frame(page)).toHaveCSS('transform', 'none');
+    // Y prever las demás láminas no las dejó a la vista ni movió la activa.
+    await expect(deck(page).locator('.slide:visible')).toHaveCount(1);
+    await expect(deck(page).locator('.slide').first()).not.toHaveAttribute('style');
+  });
+
+  test('una lámina larga entre varias que caben no impide ampliar ni encoge al llegar a ella', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-conjunto/2');
+    await expectHeading(page, 'Primera');
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.3[34]/);
+    await deck(page).getByRole('button', { name: 'Siguiente' }).click();
+    await expectHeading(page, 'La larga');
+    await page.waitForTimeout(1200);
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.3[34]/);
+  });
+
+  test('si una lámina resulta más alta de lo previsto, la ampliación baja al llegar y ya no sube', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-conjunto/3');
+    await expectHeading(page, 'Corta');
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.3[34]/);
+
+    await deck(page).getByRole('button', { name: 'Siguiente' }).click();
+    await expectHeading(page, 'Tardía');
+    await expect.poll(() => scaleOf(page)).toBeLessThan(1.3);
+    await page.waitForTimeout(900);
+    const tight = await scaleOf(page);
+    expect(tight).toBeGreaterThan(1.05);
+    const fits = await deck(page)
+      .locator('body')
+      .evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 6);
+    expect(fits).toBe(true);
+
+    await deck(page).getByRole('button', { name: 'Anterior' }).click();
+    await expectHeading(page, 'Corta');
+    await page.waitForTimeout(900);
+    expect(await scaleOf(page)).toBeCloseTo(tight, 2);
   });
 });
 

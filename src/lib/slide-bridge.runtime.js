@@ -816,39 +816,43 @@ export function slideBridgeRuntime() {
   // ventana mide distinto (un escenario 16:9 al que ya no le alcanza el
   // ancho), ahora sí depende de ella.
   var panelMemo = typeof WeakMap === 'function' ? new WeakMap() : null;
-  var layoutPass = 0;
 
-  /** 'fixed', 'bound' (depende de la ventana) o '' (aún no se sabe). */
-  function panelKind(panel, room, height) {
+  /**
+   * 'fixed', 'bound' (depende de la ventana) o '' (aún no se sabe).
+   * Con `keep` se anota la medida; sin él solo se consulta.
+   */
+  function panelKind(panel, room, height, keep) {
     if (!panelMemo) return '';
     var seen = panelMemo.get(panel);
-    if (!seen) { seen = { at: [], kind: '', pass: 0 }; panelMemo.set(panel, seen); }
+    if (!seen) {
+      if (keep) panelMemo.set(panel, [[height, room]]);
+      return '';
+    }
     var near = Math.max(16, height * 0.03);
     var kind = '';
     var own = -1;
-    for (var i = 0; i < seen.at.length; i++) {
-      var entry = seen.at[i];
+    for (var i = 0; i < seen.length; i++) {
+      var entry = seen[i];
       if (Math.abs(entry[0] - height) <= near) { own = i; continue; }
       if (Math.abs(entry[1] - room) <= 2) kind = 'fixed';
       else if (!kind) kind = 'bound';
     }
-    if (own === -1) {
-      seen.at.push([height, room]);
-      if (seen.at.length > 4) seen.at.shift();
-    } else {
-      seen.at[own][0] = height;
-      seen.at[own][1] = room;
+    if (keep) {
+      if (own === -1) {
+        seen.push([height, room]);
+        if (seen.length > 4) seen.shift();
+      } else {
+        seen[own][0] = height;
+        seen[own][1] = room;
+      }
     }
-    seen.kind = kind;
-    seen.pass = layoutPass;
     return kind;
   }
 
-  function insideFixed(panel) {
+  function insideFixed(panel, height) {
     if (!panelMemo) return false;
     for (var node = panel.parentElement; node && node !== document.body; node = node.parentElement) {
-      var seen = panelMemo.get(node);
-      if (seen && seen.pass === layoutPass && seen.kind === 'fixed') return true;
+      if (panelMemo.has(node) && panelKind(node, node.clientHeight, height, false) === 'fixed') return true;
     }
     return false;
   }
@@ -962,6 +966,160 @@ export function slideBridgeRuntime() {
     return Math.round(column);
   }
 
+  /**
+   * Alto que le falta a la ventana para mostrar el contenido sin desplazarse:
+   * lo que sobresale de la página más lo que guardan los paneles a la vista
+   * con desplazamiento propio (`soft`: la parte de los que aún no se sabe si
+   * dependen de la ventana). Lo que recorta un contenedor sin desplazamiento
+   * va aparte (`clip`): puede ser un adorno, y solo importa si crece al ampliar.
+   */
+  function needTall(all, count, memo, width, height, keep) {
+    var root = document.documentElement;
+    var extra = Math.max(0, Math.max(root.scrollHeight, document.body.scrollHeight) - height);
+    var soft = 0;
+    var clip = 0;
+    var panels = 0;
+    for (var i = 0; i < count && panels < 12; i++) {
+      var panel = all[i];
+      var room = panel.clientHeight;
+      if (room < height * 0.3) continue;
+      var flow = boxInfo(panel, memo, width, height).flowY;
+      if (flow === 'visible') continue;
+      var kind = panelKind(panel, room, height, keep);
+      var spare = panel.scrollHeight - room;
+      if (spare <= 8 || kind === 'fixed') continue;
+      var place = panel.getBoundingClientRect();
+      if (place.bottom <= 0 || place.top >= height || !visibleSpan(panel, memo, width, height)) continue;
+      if (!kind && insideFixed(panel, height)) continue;
+      panels += 1;
+      if (flow === 'auto' || flow === 'scroll') {
+        extra += spare;
+        if (!kind) soft += spare;
+      } else {
+        clip += spare;
+      }
+    }
+    return { extra: extra, soft: soft, clip: clip };
+  }
+
+  /* ---- Las demás láminas ---- */
+
+  // El tamaño se decide para la presentación entera, no para la lámina a la
+  // vista: si la portada cabe holgada pero la segunda lámina llena la
+  // pantalla, ampliar la portada obligaría a encoger en cuanto se avanzara.
+  // Para saberlo sin navegar, cada lámina oculta con `display: none` se pone
+  // un instante en el lugar de la activa, con sus mismas marcas de estado, y
+  // se mide el alto que ocuparía la página. Todo ocurre dentro de una sola
+  // tarea: el navegador no llega a pintar nada, y al terminar el documento
+  // queda exactamente como estaba (atributos, foco y desplazamiento).
+  var shownScale = 1;
+  var deckMostly = typeof cfg.mostly === 'number' ? cfg.mostly : 0.75;
+  var deckCache = [];
+  var DECK_BUDGET = 250;
+
+  function restoreAttribute(el, name, value) {
+    if (value === null) el.removeAttribute(name);
+    else el.setAttribute(name, value);
+  }
+
+  /** Clases que distinguen a la lámina activa de las demás. */
+  function activeTokens(nodes, at) {
+    var own = className(nodes[at]).split(/\s+/);
+    var named = [];
+    var unique = [];
+    for (var i = 0; i < own.length; i++) {
+      var token = own[i];
+      if (!token) continue;
+      var shared = false;
+      for (var j = 0; j < nodes.length && !shared; j++) if (j !== at && nodes[j].classList.contains(token)) shared = true;
+      if (shared) continue;
+      unique.push(token);
+      if (STATE_TOKEN.test(token)) named.push(token);
+    }
+    // «active» antes que una clase que solo lleva la portada.
+    return named.length ? named : unique;
+  }
+
+  function lookAhead(nodes, at, width, height, natural, liveTall) {
+    var active = nodes[at];
+    var shownAs = getComputedStyle(active).display;
+    var hidden = [];
+    var some = false;
+    var i;
+    for (i = 0; i < nodes.length; i++) {
+      hidden[i] = i !== at && getComputedStyle(nodes[i]).display === 'none';
+      if (hidden[i]) some = true;
+    }
+    if (!some) return null;
+
+    var tokens = activeTokens(nodes, at);
+    var all = document.body.getElementsByTagName('*');
+    var talls = [];
+    var started = Date.now();
+    // Sin ampliar, con más de esta cantidad de láminas que no caben la
+    // presentación ya no se ampliará: no hace falta medir el resto.
+    var allowed = natural ? Math.floor(nodes.length * (1 - deckMostly)) : nodes.length;
+    var misses = liveTall > height + 6 ? 1 : 0;
+    var scrollLeft = window.pageXOffset;
+    var scrollTop = window.pageYOffset;
+    var activeStyle = active.getAttribute('style');
+    try {
+      // La activa sale del flujo, con su tamaño, para dejar su sitio. Arriba y
+      // lejos no alarga la página; y sigue dibujada, así que conserva el foco,
+      // sus animaciones y el desplazamiento de lo que contiene.
+      active.setAttribute('style', (activeStyle ? activeStyle + ';' : '') +
+        'box-sizing:border-box!important;width:' + active.offsetWidth + 'px!important;height:' + active.offsetHeight +
+        'px!important;position:absolute!important;top:-100000px!important;transition:none!important');
+      for (i = 0; i < nodes.length; i++) {
+        if (!hidden[i] || misses > allowed || Date.now() - started > DECK_BUDGET) { talls.push(null); continue; }
+        var slide = nodes[i];
+        var slideClass = slide.getAttribute('class');
+        var slideStyle = slide.getAttribute('style');
+        var quiet = (slideStyle ? slideStyle + ';' : '') + 'transition:none!important;animation:none!important';
+        try {
+          slide.setAttribute('style', quiet);
+          if (tokens.length) slide.setAttribute('class', (slideClass ? slideClass + ' ' : '') + tokens.join(' '));
+          // Las que se muestran cambiando `style.display` o el atributo `hidden`.
+          if (getComputedStyle(slide).display === 'none') slide.setAttribute('style', quiet + ';display:' + shownAs + '!important');
+          var tall = Math.round(height + needTall(all, Math.min(all.length, 9000), null, width, height, false).extra);
+          talls.push(tall);
+          if (tall > height + 6) misses += 1;
+        } finally {
+          restoreAttribute(slide, 'class', slideClass);
+          restoreAttribute(slide, 'style', slideStyle);
+        }
+      }
+    } finally {
+      restoreAttribute(active, 'style', activeStyle);
+      if (window.pageXOffset !== scrollLeft || window.pageYOffset !== scrollTop) window.scrollTo(scrollLeft, scrollTop);
+      // Lo que se movió aquí no es texto nuevo de la presentación.
+      if (mathObserver) mathObserver.takeRecords();
+    }
+    return talls;
+  }
+
+  /** Alto que pediría la página con cada lámina activa; `null` donde no se sabe. */
+  function deckTalls(width, height, liveTall) {
+    var p = detectFromGroup();
+    if (!p || !group || !p.el) return null;
+    var nodes = group.nodes;
+    if (nodes.length < 2 || nodes.length > 60) return null;
+    var key = width + 'x' + height + '/' + nodes.length;
+    var entry = null;
+    for (var i = 0; i < deckCache.length; i++) if (deckCache[i].key === key) entry = deckCache[i];
+    if (!entry) {
+      var talls = null;
+      try { talls = lookAhead(nodes, p.index, width, height, shownScale === 1, liveTall); } catch (e) { talls = null; }
+      entry = { key: key, talls: talls };
+      deckCache.push(entry);
+      if (deckCache.length > 3) deckCache.shift();
+    }
+    if (!entry.talls) return null;
+    // Lo medido con la lámina a la vista vale más que lo previsto.
+    entry.talls[p.index] = liveTall;
+    return { talls: entry.talls.slice(), at: p.index };
+  }
+
   function measureLayout() {
     // El borde es el de la ventana completa, no el del área sin la barra de
     // desplazamiento: un elemento de `100vw` siempre queda bajo esa barra y
@@ -970,7 +1128,7 @@ export function slideBridgeRuntime() {
     var height = window.innerHeight;
     var root = document.documentElement;
     var body = document.body;
-    var out = { width: width, height: height, need: width, main: width, nav: false, tall: height, soft: 0, clip: 0, col: 0, floor: 0 };
+    var out = { width: width, height: height, need: width, main: width, nav: false, tall: height, soft: 0, clip: 0, col: 0, floor: 0, deck: null, at: -1 };
     if (!body || width < 40 || height < 40) return out;
 
     var client = root.clientWidth || width;
@@ -1015,43 +1173,21 @@ export function slideBridgeRuntime() {
       }
     }
 
-    // 2) Alto que ocuparía el contenido sin desplazarse: el de la página más
-    //    lo que guardan los paneles a la vista con desplazamiento propio. Lo
-    //    que recorta un contenedor sin desplazamiento se anota aparte: puede
-    //    ser un adorno, y solo importa si crece al ampliar.
-    var extra = Math.max(0, Math.max(root.scrollHeight, body.scrollHeight) - height);
-    var soft = 0;
-    var clip = 0;
-    var panels = 0;
-    layoutPass += 1;
-    for (i = 0; i < count && panels < 12; i++) {
-      var panel = all[i];
-      var room = panel.clientHeight;
-      if (room < height * 0.3) continue;
-      var flow = boxInfo(panel, memo, width, height).flowY;
-      if (flow === 'visible') continue;
-      var kind = panelKind(panel, room, height);
-      var spare = panel.scrollHeight - room;
-      if (spare <= 8 || kind === 'fixed') continue;
-      var place = panel.getBoundingClientRect();
-      if (place.bottom <= 0 || place.top >= height || !visibleSpan(panel, memo, width, height)) continue;
-      if (!kind && insideFixed(panel)) continue;
-      panels += 1;
-      if (flow === 'auto' || flow === 'scroll') {
-        extra += spare;
-        // Aún no se sabe si su alto depende de la ventana.
-        if (!kind) soft += spare;
-      } else {
-        clip += spare;
-      }
-    }
-    out.tall = Math.round(height + extra);
-    out.soft = Math.round(soft);
-    out.clip = Math.round(clip);
+    // 2) Alto que ocuparía el contenido sin desplazarse.
+    var tall = needTall(all, count, memo, width, height, true);
+    out.tall = Math.round(height + tall.extra);
+    out.soft = Math.round(tall.soft);
+    out.clip = Math.round(tall.clip);
 
     // 3) Columna de contenido: solo interesa si nada se corta.
     if (out.need <= width + 2) out.col = contentColumn(all, count, memo, width, height, client);
     out.floor = layoutFloor(width, height);
+
+    // 4) Las demás láminas: solo cuando de ellas depende ampliar o seguir ampliada.
+    if (shownScale > 1 || (shownScale === 1 && out.col > 0)) {
+      var deck = deckTalls(width, height, out.tall);
+      if (deck) { out.deck = deck.talls; out.at = deck.at; }
+    }
     return out;
   }
 
@@ -1074,10 +1210,10 @@ export function slideBridgeRuntime() {
   function reportLayout() {
     layoutTimer = 0;
     var m = measureLayout();
-    var text = [m.width, m.height, m.need, m.main, m.nav ? 1 : 0, m.tall, m.soft, m.clip, m.col, m.floor].join('/');
+    var text = [m.width, m.height, m.need, m.main, m.nav ? 1 : 0, m.tall, m.soft, m.clip, m.col, m.floor, m.at, m.deck ? m.deck.join(',') : ''].join('/');
     if (text === lastLayout) return;
     lastLayout = text;
-    post({ t: 'layout', width: m.width, height: m.height, need: m.need, main: m.main, nav: m.nav, tall: m.tall, soft: m.soft, clip: m.clip, col: m.col, floor: m.floor });
+    post({ t: 'layout', width: m.width, height: m.height, need: m.need, main: m.main, nav: m.nav, tall: m.tall, soft: m.soft, clip: m.clip, col: m.col, floor: m.floor, deck: m.deck, at: m.at });
   }
 
   function layoutSoon(delay) {
@@ -1167,6 +1303,7 @@ export function slideBridgeRuntime() {
     if (!data || data.__sys !== token) return;
     if (data.t === 'mode') { presenting = !!data.presenting; report(true); }
     else if (data.t === 'measure') { lastLayout = ''; layoutSoon(0); }
+    else if (data.t === 'fit') { shownScale = data.scale > 0 ? Number(data.scale) : 1; }
     else if (data.t === 'nav') { step(data.dir > 0 ? 1 : -1, null); }
     else if (data.t === 'focus') { try { window.focus(); } catch (e) {} }
     else if (data.t === 'theme' && cfg.fragment) { document.documentElement.setAttribute('data-theme', data.theme === 'light' ? 'light' : 'dark'); }

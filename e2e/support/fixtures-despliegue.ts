@@ -224,7 +224,7 @@ const columnCss = `<style>
   body{padding:0}
   main{max-width:760px;margin:0 auto;padding:24px 0}
   .block{height:380px;background:#e0e7ff;border-radius:12px}
-  .slide{display:none}.slide.active{display:block}
+  .slide{display:none;min-height:220px}.slide.active{display:block}
 </style>`;
 
 const paragraphs = (count: number) =>
@@ -235,7 +235,7 @@ export const narrowPage = page(
   'Tamaño · columna estrecha',
   columnCss,
   `<main><h1 data-testid="heading">Columna estrecha</h1>
-${paragraphs(40)}
+${paragraphs(60)}
 </main>`,
 );
 
@@ -255,7 +255,7 @@ export const tightSlide = page(
   `<main><h1 data-testid="heading">Lámina justa</h1><p>Una figura ocupa casi todo el alto.</p><div class="block"></div><p>Pie de la lámina.</p></main>`,
 );
 
-/** Dos láminas: una corta y una justa. La ampliación baja al llegar a la justa y ya no sube. */
+/** Dos láminas: una corta y una justa. El tamaño es uno para las dos: manda la justa. */
 export const twoSizes = page(
   'Tamaño · láminas distintas',
   columnCss,
@@ -265,6 +265,60 @@ export const twoSizes = page(
   <p><button id="btn-prev">Anterior</button> <button id="btn-next">Siguiente</button></p>
 </main>
 ${toggleScript}`,
+);
+
+const navRow = `<p><button id="btn-prev">Anterior</button> <button id="btn-next">Siguiente</button></p>`;
+const shortSlide = (title: string, active = false) =>
+  `<section class="slide${active ? ' active' : ''}"><h1 data-testid="heading">${title}</h1>${paragraphs(2)}</section>`;
+const tallSlide = (title: string, height: number) =>
+  `<section class="slide"><h1 data-testid="heading">${title}</h1><p>Una figura alta.</p><div class="block" style="height:${height}px"></div><p>Pie de la lámina.</p></section>`;
+
+/** Portada corta y láminas que ya llenan la pantalla: ampliar solo la portada sería un vaivén. */
+export const coverThenFull = page(
+  'Tamaño · portada y láminas llenas',
+  columnCss,
+  `<main>
+  ${shortSlide('Portada', true)}
+  ${tallSlide('Llena uno', 640)}
+  ${tallSlide('Llena dos', 700)}
+  ${navRow}
+</main>
+${toggleScript}`,
+);
+
+/** Casi todas caben; una es larga y ya se desplazaba. Se amplía y la larga no lo impide. */
+export const mostlyShort = page(
+  'Tamaño · una lámina larga',
+  columnCss,
+  `<main>
+  ${shortSlide('Primera', true)}
+  ${tallSlide('La larga', 900)}
+  ${shortSlide('Tercera')}
+  ${shortSlide('Cuarta')}
+  ${navRow}
+</main>
+${toggleScript}`,
+);
+
+/** La segunda lámina dibuja su figura al llegar a ella: no se puede prever desde la portada. */
+export const lateSlide = page(
+  'Tamaño · lámina que se completa al llegar',
+  columnCss,
+  `<main>
+  ${shortSlide('Corta', true)}
+  <section class="slide" id="late"><h1 data-testid="heading">Tardía</h1><p>Su figura se dibuja al llegar.</p><p>Pie de la lámina.</p></section>
+  ${navRow}
+</main>
+${toggleScript}
+<script>
+  document.getElementById('btn-next').addEventListener('click', function () {
+    var slide = document.getElementById('late');
+    if (slide.querySelector('.block')) return;
+    var figure = document.createElement('div');
+    figure.className = 'block';
+    slide.insertBefore(figure, slide.lastElementChild);
+  });
+</script>`,
 );
 
 const headerCss = `<style>
@@ -339,7 +393,7 @@ export const withBreakpoint = page(
   @media (max-width: 900px){ #mode::after{content:"tableta"} main{max-width:none;padding:24px} }
 </style>`,
   `<main><h1 data-testid="heading">Con punto de corte</h1><p>Diseño: <span id="mode"></span></p>
-${paragraphs(30)}
+${paragraphs(60)}
 </main>`,
 );
 
@@ -348,7 +402,7 @@ export const withScriptBreakpoint = page(
   'Tamaño · punto de corte en el código',
   columnCss,
   `<main><h1 data-testid="heading">Corte en el código</h1><p>Diseño: <span id="mode"></span></p>
-${paragraphs(30)}
+${paragraphs(60)}
 </main>
 <script>
   var compact = window.matchMedia('(max-width: 960px)');
@@ -376,7 +430,7 @@ export const viewportColumn = page(
   'Tamaño · columna en vw',
   `<style>body{padding:0} main{width:60vw;margin:0 auto;padding:24px 0}</style>`,
   `<main><h1 data-testid="heading">Columna en vw</h1>
-${paragraphs(30)}
+${paragraphs(60)}
 </main>`,
 );
 
@@ -442,6 +496,7 @@ export const labCourse: SeedChapter[] = [
       { id: 'lab-ancho', title: '1.2 Ancho', decks: [wideToolbar, decoration, sideBySide, viewportRelative, fullWidthBand] },
       { id: 'lab-tamano', title: '1.4 Tamaño', decks: [narrowPage, narrowSlide, tightSlide, twoSizes, wideHeader, wideHeaderNav] },
       { id: 'lab-escenario', title: '1.5 Escenarios y cortes', decks: [fixedStage, fixedStageTight, withBreakpoint, withScriptBreakpoint, clippedStage, viewportColumn] },
+      { id: 'lab-conjunto', title: '1.6 La presentación entera', decks: [coverThenFull, mostlyShort, lateSlide] },
       { id: 'lab-unica', title: '1.3 Páginas únicas', decks: [labPage, labKeys, rerendered, closing] },
     ],
   },

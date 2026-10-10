@@ -1,5 +1,6 @@
 import { sanitizeHtml } from './sanitize';
 import { SLIDE_BRIDGE_SOURCE } from './slide-bridge';
+import { FIT } from './slide-fit';
 
 /**
  * Cómo se muestra una presentación.
@@ -179,6 +180,7 @@ function bridgeTag(options: SrcDocOptions, fragment: boolean): string {
     origin: /^https?:\/\//.test(options.origin) ? options.origin : '',
     presenting: !!options.presenting,
     fragment,
+    mostly: FIT.MOSTLY,
   }).replace(/</g, '\\u003c');
   return `<script data-sys-bridge>window.__SYS_BRIDGE__=${config};${SLIDE_BRIDGE_SOURCE}</script>`;
 }

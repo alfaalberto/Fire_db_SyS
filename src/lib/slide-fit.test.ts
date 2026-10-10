@@ -73,8 +73,8 @@ describe('barra de botones que se sale en una ventana amplia', () => {
 });
 
 describe('ampliar lo que deja márgenes', () => {
-  it('amplía una página larga hasta que su columna llena el ancho', () => {
-    const out = nextFit(createFit(), report(1920, 1080, { col: 1480, tall: 1500 }), desktop);
+  it('amplía un documento largo hasta que su columna llena el ancho', () => {
+    const out = nextFit(createFit(), report(1920, 1080, { col: 1480, tall: 2400 }), desktop);
     expect(out.width).toBe(Math.round(1920 / ((0.96 * 1920) / 1480)));
     expect(scaleOf(out.width, desktop.w)).toBeCloseTo(1.245, 2);
   });
@@ -85,11 +85,13 @@ describe('ampliar lo que deja márgenes', () => {
   });
 
   it('no amplía si la ganancia sería inapreciable', () => {
-    expect(nextFit(createFit(), report(1616, 890, { col: 1496, tall: 1300 }), { w: 1616, h: 890 }).width).toBeNull();
+    expect(nextFit(createFit(), report(1616, 890, { col: 1496 }), { w: 1616, h: 890 }).width).toBeNull();
   });
 
-  it('no amplía una lámina que ya rebasa un poco la pantalla', () => {
+  it('no amplía una página que ya rebasa la pantalla', () => {
     expect(nextFit(createFit(), report(1616, 890, { col: 1076, tall: 916 }), { w: 1616, h: 890 }).width).toBeNull();
+    // Tampoco la que necesita pantalla y media: ya obliga a desplazarse.
+    expect(nextFit(createFit(), report(1920, 1080, { col: 1280, tall: 1600 }), desktop).width).toBeNull();
   });
 
   it('una lámina que cabía debe seguir cabiendo: amplía menos', () => {
@@ -113,13 +115,13 @@ describe('ampliar lo que deja márgenes', () => {
   });
 
   it('si ampliada se corta algo a lo ancho, amplía solo lo que admite', () => {
-    const first = nextFit(createFit(), report(1920, 1080, { col: 1280, tall: 2000 }), desktop);
-    const second = nextFit(first.memory, report(first.width!, 750, { need: 1424, main: first.width!, tall: 2000 }), desktop);
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1280, tall: 2400 }), desktop);
+    const second = nextFit(first.memory, report(first.width!, 750, { need: 1424, main: first.width!, tall: 2400 }), desktop);
     expect(second.width).toBe(Math.round(1920 / (1920 / 1424)));
   });
 
-  it('dentro de una presentación la ampliación solo baja', () => {
-    const first = nextFit(createFit(), report(1920, 1080, { col: 1480, tall: 1500 }), desktop);
+  it('mientras se recorre, la ampliación solo baja', () => {
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1480, tall: 2400 }), desktop);
     // Una lámina más justa obliga a bajar…
     const tight = nextFit(first.memory, report(first.width!, 867, { tall: 1000 }), desktop);
     expect(scaleOf(tight.width, desktop.w)).toBeLessThan(scaleOf(first.width, desktop.w));
@@ -138,6 +140,73 @@ describe('ampliar lo que deja márgenes', () => {
     expect(out.width).toBe(1600);
     // Si el techo conocido ya no deja ampliar, ni lo intenta.
     expect(nextFit(createFit(1), report(1920, 1080, { col: 1070 }), desktop).width).toBeNull();
+  });
+});
+
+describe('la presentación entera', () => {
+  /** Medida con las demás láminas previstas; la que está a la vista es la primera. */
+  const deckReport = (width: number, height: number, talls: Array<number | null>, extra: Partial<Parameters<typeof nextFit>[1]> = {}) =>
+    report(width, height, { tall: talls[0] ?? height, deck: talls, at: 0, ...extra });
+
+  it('se amplía hasta donde cabe su lámina más alta, no solo la portada', () => {
+    // La portada cabe holgada; la tercera lámina ocupa 900 px de los 1080.
+    const first = nextFit(createFit(), deckReport(1920, 1080, [1080, 1080, 1080, 1080], { col: 1280 }), desktop);
+    expect(first.width).toBe(1333);
+    // Ampliada (1333 × 750), la tercera pediría 917 px.
+    const second = nextFit(first.memory, deckReport(1333, 750, [750, 750, 917, 760]), desktop);
+    const scale = scaleOf(second.width, desktop.w);
+    expect(scale).toBeCloseTo((1080 / 917) * 0.995, 2);
+    // Con ese tamaño caben todas: no se toca más.
+    const third = nextFit(second.memory, deckReport(second.width!, Math.round(1080 / scale), [922, 922, 917, 922]), desktop);
+    expect(third.width).toBe(second.width);
+  });
+
+  it('si la mayoría de las láminas ya llena la pantalla, no se amplía aunque la portada quepa', () => {
+    const out = nextFit(createFit(), deckReport(1920, 1080, [1080, 1210, 1198, 1171, 1300, 1080], { col: 1466 }), desktop);
+    expect(out.width).toBeNull();
+  });
+
+  it('unas pocas láminas largas no impiden ampliar ni limitan después', () => {
+    // Siete de ocho caben; la cuarta ya necesitaba desplazarse 213 px.
+    const talls = [1080, 1080, 1080, 1293, 1080, 1080, 1080, 1080];
+    const first = nextFit(createFit(), deckReport(1920, 1080, talls, { col: 942 }), desktop);
+    expect(first.width).toBe(1280);
+    // Ampliada, la larga pide 1293 px (poco más que la pantalla): no manda.
+    const second = nextFit(first.memory, deckReport(1280, 720, [720, 720, 720, 1293, 720, 720, 720, 720]), desktop);
+    expect(second.width).toBe(1280);
+    // Al llegar a ella tampoco se encoge.
+    const there = nextFit(second.memory, report(1280, 720, { tall: 1293, deck: [720, 720, 720, 1293, 720, 720, 720, 720], at: 3 }), desktop);
+    expect(there.width).toBe(1280);
+  });
+
+  it('si una lámina que cabía resulta más alta de lo previsto, baja al llegar a ella', () => {
+    const first = nextFit(createFit(), deckReport(1920, 1080, [1080, 1080, 1080], { col: 1280 }), desktop);
+    const second = nextFit(first.memory, deckReport(1333, 750, [750, 750, 750]), desktop);
+    expect(second.width).toBe(1333);
+    // La segunda dibuja una gráfica al activarse y pide 820 px.
+    const there = nextFit(second.memory, report(1333, 750, { tall: 820, deck: [750, 820, 750], at: 1 }), desktop);
+    expect(scaleOf(there.width, desktop.w)).toBeCloseTo((1080 / 820) * 0.995, 2);
+  });
+
+  it('si las láminas se conocen después de ampliar y la mayoría no cabía, vuelve a su tamaño', () => {
+    // Al decidir solo se veía una portada que cabe.
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1280 }), desktop);
+    expect(first.width).toBe(1333);
+    const second = nextFit(first.memory, deckReport(1333, 750, [750, 1260, 1345, 1290]), desktop);
+    expect(second.width).toBeNull();
+  });
+
+  it('y si casi todas cabían, sigue ampliada hasta donde cabe la más alta', () => {
+    const first = nextFit(createFit(), report(1920, 1080, { col: 1280 }), desktop);
+    const second = nextFit(first.memory, deckReport(1333, 750, [750, 900, 760, 1400]), desktop);
+    expect(scaleOf(second.width, desktop.w)).toBeCloseTo((1080 / 900) * 0.995, 2);
+  });
+
+  it('lo que no se pudo prever se trata como hasta ahora', () => {
+    // Solo se conoce la lámina a la vista: decide ella.
+    const out = nextFit(createFit(), deckReport(1920, 1080, [1080, null, null], { col: 1280 }), desktop);
+    expect(out.width).toBe(1333);
+    expect(nextFit(createFit(), deckReport(1920, 1080, [1140, null, null], { col: 1280 }), desktop).width).toBeNull();
   });
 });
 

@@ -246,6 +246,8 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
         clip?: number;
         col?: number;
         floor?: number;
+        deck?: unknown;
+        at?: number;
         count?: number;
       } | null;
       if (!data || data.__sys !== tokenRef.current) return;
@@ -258,6 +260,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
           hold(SETTLE_MS);
           send({ t: 'mode', presenting: live.current.presenting });
           send({ t: 'theme', theme: live.current.theme });
+          send({ t: 'fit', scale: 1 });
           break;
         case 'progress':
           h.onProgress?.(typeof data.index === 'number' && typeof data.total === 'number' ? { index: data.index, total: data.total } : null);
@@ -301,6 +304,8 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
             clip: Number(data.clip) || 0,
             col: Number(data.col) || 0,
             floor: Number(data.floor) || 0,
+            deck: Array.isArray(data.deck) ? data.deck.slice(0, 60).map((tall) => (typeof tall === 'number' && tall > 0 ? tall : null)) : null,
+            at: typeof data.at === 'number' ? data.at : -1,
           };
           if (!state.enabled) {
             // Ajuste desactivado: solo se anota si haría falta.
@@ -355,6 +360,11 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
   useEffect(() => {
     handlers.current.onFit?.({ scale, needed: fitNeeded });
   }, [scale, fitNeeded]);
+
+  // El puente necesita saber si está ampliada para decidir qué medir.
+  useEffect(() => {
+    if (readyRef.current) send({ t: 'fit', scale });
+  }, [scale, send]);
 
   useEffect(() => {
     if (readyRef.current) send({ t: 'theme', theme });
