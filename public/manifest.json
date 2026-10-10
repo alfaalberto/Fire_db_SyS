@@ -1,21 +1,15 @@
 {
   "name": "Señales y Sistemas",
-  "short_name": "SyS",
-  "description": "Plataforma interactiva para el curso de Señales y Sistemas",
+  "short_name": "Señales",
+  "description": "Presentaciones interactivas del curso de Señales y Sistemas",
+  "lang": "es",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#0a0f1a",
-  "theme_color": "#2dd4bf",
+  "background_color": "#0B1020",
+  "theme_color": "#2563EB",
   "icons": [
-    {
-      "src": "/icons/icon-192.svg",
-      "sizes": "192x192",
-      "type": "image/svg+xml"
-    },
-    {
-      "src": "/icons/icon-512.svg",
-      "sizes": "512x512",
-      "type": "image/svg+xml"
-    }
+    { "src": "/icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

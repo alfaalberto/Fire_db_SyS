@@ -1,87 +1,92 @@
 rules_version = '2';
 
-// NOTE ON SECURITY
-// ----------------
-// This app currently has NO authentication, so reads/writes/deletes are open.
-// These rules harden the open model by (1) restricting access to the known
-// collections only, (2) validating document shape, and (3) capping string
-// sizes to prevent abuse / oversized writes.
+// Señales y Sistemas — reglas de Firestore
+// ----------------------------------------
+// Leer:     cualquiera (el curso es público).
+// Escribir: solo docentes. Un docente es una cuenta de Google con correo
+//           verificado que tiene un documento en la colección `admins`, cuyo
+//           ID es su correo en minúsculas (se crea a mano en la consola).
 //
-// RECOMMENDED next step: add Firebase Auth and replace `if true` below with
-// `if request.auth != null` (or an allow-list of admin UIDs). A ready-to-use
-// authenticated version is provided in comments at the bottom of this file.
+// Publicar estas reglas: consola de Firebase → Firestore → Reglas → pegar y
+// «Publicar», o `firebase deploy --only firestore:rules`.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Max characters allowed for a serialized string field. Each chunk is kept
-    // well under Firestore's 1 MiB document limit by the client (~900 KB bytes).
-    function maxStr() { return 1500000; }
+    // Límite holgado para un campo de texto; el cliente trocea a ~900 kB.
+    function maxText() { return 1500000; }
+
+    function isTeacher() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/admins/$(request.auth.token.email.lower()));
+    }
 
     function isChunk(data) {
       return data.keys().hasOnly(['index', 'data'])
         && data.index is int
         && data.data is string
-        && data.data.size() < maxStr();
+        && data.data.size() < maxText();
     }
 
-    function isSlide(data) {
+    function isSlide(data, slideId) {
       return data.keys().hasOnly(['id', 'content', 'contentChunked', 'contentChunkCount'])
-        && data.id is string
-        && data.id.size() < 512
+        && data.id == slideId
         && (data.content == null || data.content is list);
     }
 
-    function isMeta(data) {
-      return data.keys().hasOnly(['data', 'chunked', 'chunkCount', 'updatedAt'])
-        && (data.data == null || (data.data is string && data.data.size() < maxStr()));
+    function isOutline(data) {
+      return data.keys().hasOnly(['v', 'data', 'updatedAt'])
+        && data.v == 2
+        && data.data is string
+        && data.data.size() < maxText()
+        && data.updatedAt is number;
     }
 
-    // --- Slides ---
+    // Contenido de cada tema.
     match /slides/{slideId} {
       allow read: if true;
-      allow create, update: if isSlide(request.resource.data);
-      allow delete: if true;
+      allow create, update: if isTeacher() && isSlide(request.resource.data, slideId);
+      allow delete: if isTeacher();
 
       match /contentChunks/{chunkId} {
         allow read: if true;
-        allow create, update: if isChunk(request.resource.data);
-        allow delete: if true;
+        allow create, update: if isTeacher() && isChunk(request.resource.data);
+        allow delete: if isTeacher();
       }
     }
 
-    // --- Full index (cross-device sync) ---
-    match /meta/{docId} {
+    // Temario (formato actual).
+    match /meta/outline {
       allow read: if true;
-      allow create, update: if isMeta(request.resource.data);
-      allow delete: if true;
+      allow create, update: if isTeacher() && isOutline(request.resource.data);
+      allow delete: if false;
+    }
+
+    // Formato anterior: se conserva legible para migrar; ya no se escribe.
+    // Un docente puede borrarlo desde Mantenimiento.
+    match /meta/fullIndex {
+      allow read: if true;
+      allow create, update: if false;
+      allow delete: if isTeacher();
 
       match /indexChunks/{chunkId} {
         allow read: if true;
-        allow create, update: if isChunk(request.resource.data);
-        allow delete: if true;
+        allow create, update: if false;
+        allow delete: if isTeacher();
       }
     }
 
-    // Deny everything else by default.
+    // Lista de docentes. Cada quien solo puede consultar su propio registro;
+    // nadie puede listarla ni modificarla desde la app.
+    match /admins/{email} {
+      allow get: if request.auth != null && request.auth.token.email.lower() == email;
+      allow list, create, update, delete: if false;
+    }
+
+    // Todo lo demás, cerrado.
     match /{document=**} {
       allow read, write: if false;
     }
   }
 }
-
-// ---------------------------------------------------------------------------
-// RECOMMENDED AUTHENTICATED VERSION (enable after adding Firebase Auth):
-//
-// service cloud.firestore {
-//   match /databases/{database}/documents {
-//     match /{document=**} {
-//       allow read: if request.auth != null;
-//       allow write: if request.auth != null;
-//       // Or restrict writes to specific admins:
-//       // allow write: if request.auth != null
-//       //   && request.auth.uid in ['YOUR_ADMIN_UID'];
-//     }
-//   }
-// }
-// ---------------------------------------------------------------------------

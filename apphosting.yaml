@@ -1,9 +1,12 @@
+# Firebase App Hosting
 runConfig:
   cpu: 1
   memoryMiB: 512
   concurrency: 80
 
 env:
+  # Identificadores públicos del proyecto de Firebase (no son secretos: los
+  # permisos los deciden firestore.rules y la colección `admins`).
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY
     value: AIzaSyAMDFm8XgH5YyK-4FWu8ohq26BnELij1tY
   - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
@@ -16,7 +19,6 @@ env:
     value: "305300859054"
   - variable: NEXT_PUBLIC_FIREBASE_APP_ID
     value: "1:305300859054:web:f2caf7bc6620d59ee2e53f"
+  # "false" quita los scripts de las presentaciones antes de mostrarlas.
   - variable: NEXT_PUBLIC_TRUST_SLIDES
     value: "true"
-  - variable: NEXT_PUBLIC_ENABLE_MATHJAX
-    value: "false"

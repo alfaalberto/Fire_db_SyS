@@ -1,19 +1,30 @@
-import { produce } from 'immer';
-import type { IndexItem } from './types';
+/**
+ * Operaciones puras sobre el árbol del temario. Son genéricas: funcionan igual
+ * con el temario ligero (`OutlineItem`) y con el árbol de respaldo que lleva el
+ * HTML incrustado (`IndexItem`). Ninguna muta su entrada.
+ */
+export interface TreeNode<T> {
+  id: string;
+  title: string;
+  children?: T[];
+}
 
-/** Depth-first flatten of the index tree (parents before children). */
-export function flattenIndex(items: IndexItem[]): IndexItem[] {
-  const result: IndexItem[] = [];
-  for (const item of items) {
-    result.push(item);
-    if (item.children && item.children.length > 0) {
-      result.push(...flattenIndex(item.children));
+type Node<T> = TreeNode<T>;
+
+/** Recorrido en profundidad: cada padre antes que sus hijos. */
+export function flattenIndex<T extends Node<T>>(items: T[]): T[] {
+  const result: T[] = [];
+  const walk = (nodes: T[]) => {
+    for (const node of nodes) {
+      result.push(node);
+      if (node.children && node.children.length > 0) walk(node.children);
     }
-  }
+  };
+  walk(items);
   return result;
 }
 
-export function findItemById(items: IndexItem[], id: string): IndexItem | null {
+export function findItemById<T extends Node<T>>(items: T[], id: string): T | null {
   for (const item of items) {
     if (item.id === id) return item;
     if (item.children) {
@@ -24,7 +35,7 @@ export function findItemById(items: IndexItem[], id: string): IndexItem | null {
   return null;
 }
 
-export function getBreadcrumbs(items: IndexItem[], targetId: string, path: IndexItem[] = []): IndexItem[] {
+export function getBreadcrumbs<T extends Node<T>>(items: T[], targetId: string, path: T[] = []): T[] {
   for (const item of items) {
     if (item.id === targetId) return [...path, item];
     if (item.children) {
@@ -35,33 +46,7 @@ export function getBreadcrumbs(items: IndexItem[], targetId: string, path: Index
   return [];
 }
 
-export function updateItemContent(items: IndexItem[], id: string, content: string[] | null): IndexItem[] {
-  return produce(items, (draft) => {
-    const item = findItemById(draft, id);
-    if (item) {
-      item.content = content && content.length > 0 ? content : undefined;
-    }
-  });
-}
-
-export function mergeLoadedContent(
-  items: IndexItem[],
-  docs: Array<{ id: string; content: string[] | null }>
-): IndexItem[] {
-  return produce(items, (draft) => {
-    for (const doc of docs) {
-      const item = findItemById(draft, doc.id);
-      if (!item) continue;
-      const hasLocalContent = !!item.content && item.content.length > 0;
-      const hasLoadedContent = !!doc.content && doc.content.length > 0;
-      if (!hasLocalContent && hasLoadedContent) {
-        item.content = doc.content;
-      }
-    }
-  });
-}
-
-export function collectAllIds(items: IndexItem[], acc: Set<string> = new Set()): Set<string> {
+export function collectAllIds<T extends Node<T>>(items: T[], acc: Set<string> = new Set()): Set<string> {
   for (const item of items) {
     acc.add(item.id);
     if (item.children) collectAllIds(item.children, acc);
@@ -69,23 +54,44 @@ export function collectAllIds(items: IndexItem[], acc: Set<string> = new Set()):
   return acc;
 }
 
-export function collectContentIds(items: IndexItem[], acc: string[] = []): string[] {
-  for (const item of items) {
-    if (item.content && item.content.length > 0) acc.push(item.id);
-    if (item.children) collectContentIds(item.children, acc);
-  }
-  return acc;
+/**
+ * Aplica `update` al nodo `id` y devuelve un árbol nuevo. Solo se copian los
+ * nodos del camino hasta el objetivo; el resto se comparte con el original.
+ * Si el nodo no existe devuelve el mismo arreglo recibido.
+ */
+export function updateItem<T extends Node<T>>(items: T[], id: string, update: (item: T) => T): T[] {
+  let changed = false;
+  const next = items.map((item) => {
+    if (item.id === id) {
+      changed = true;
+      return update(item);
+    }
+    if (item.children) {
+      const children = updateItem(item.children, id, update);
+      if (children !== item.children) {
+        changed = true;
+        return { ...item, children };
+      }
+    }
+    return item;
+  });
+  return changed ? next : items;
 }
 
-export function generateUniqueId(items: IndexItem[], title: string): string {
-  const existing = collectAllIds(items);
-  const base =
+export function slugify(title: string): string {
+  return (
     title
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '') // strip diacritics so "sección" -> "seccion"
+      .replace(/[̀-ͯ]/g, '') // "sección" -> "seccion"
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '') || 'item';
+      .replace(/(^-|-$)/g, '') || 'item'
+  );
+}
+
+export function generateUniqueId<T extends Node<T>>(items: T[], title: string): string {
+  const existing = collectAllIds(items);
+  const base = slugify(title);
   let candidate = base;
   let n = 1;
   while (existing.has(candidate)) {
@@ -95,49 +101,49 @@ export function generateUniqueId(items: IndexItem[], title: string): string {
   return candidate;
 }
 
-export function renameItem(items: IndexItem[], id: string, title: string): IndexItem[] {
-  return produce(items, (draft) => {
-    const item = findItemById(draft, id);
-    if (item) item.title = title;
-  });
+export function renameItem<T extends Node<T>>(items: T[], id: string, title: string): T[] {
+  return updateItem(items, id, (item) => ({ ...item, title }));
 }
 
-export function deleteItem(items: IndexItem[], id: string): IndexItem[] {
-  return produce(items, (draft) => {
-    const removeFrom = (arr: IndexItem[]): boolean => {
-      const idx = arr.findIndex((it) => it.id === id);
-      if (idx !== -1) {
-        arr.splice(idx, 1);
-        return true;
-      }
-      for (const it of arr) {
-        if (it.children && removeFrom(it.children)) {
-          if (it.children.length === 0) delete it.children;
-          return true;
-        }
-      }
-      return false;
-    };
-    removeFrom(draft);
-  });
+function withChildren<T extends Node<T>>(item: T, children: T[]): T {
+  if (children.length > 0) return { ...item, children };
+  const { children: _dropped, ...rest } = item;
+  return rest as T;
 }
 
-export function addChildItem(items: IndexItem[], parentId: string | null, newItem: IndexItem): IndexItem[] {
-  return produce(items, (draft) => {
-    if (parentId === null) {
-      draft.push(newItem);
-      return;
+/** Quita el nodo `id` (y su subárbol). Devuelve también el nodo retirado. */
+function detach<T extends Node<T>>(items: T[], id: string): { items: T[]; removed: T | null } {
+  const index = items.findIndex((item) => item.id === id);
+  if (index !== -1) {
+    return { items: [...items.slice(0, index), ...items.slice(index + 1)], removed: items[index] };
+  }
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item.children) continue;
+    const result = detach(item.children, id);
+    if (result.removed) {
+      const next = [...items];
+      next[i] = withChildren(item, result.items);
+      return { items: next, removed: result.removed };
     }
-    const parent = findItemById(draft, parentId);
-    if (parent) {
-      if (!parent.children) parent.children = [];
-      parent.children.push(newItem);
-    }
-  });
+  }
+  return { items, removed: null };
 }
 
-/** True if `ancestorId` is `id` itself or one of its descendants. */
-export function isSelfOrDescendant(items: IndexItem[], ancestorId: string, id: string): boolean {
+export function deleteItem<T extends Node<T>>(items: T[], id: string): T[] {
+  return detach(items, id).items;
+}
+
+export function addChildItem<T extends Node<T>>(items: T[], parentId: string | null, newItem: T): T[] {
+  if (parentId === null) return [...items, newItem];
+  return updateItem(items, parentId, (parent) => ({
+    ...parent,
+    children: [...(parent.children ?? []), newItem],
+  }));
+}
+
+/** Verdadero si `id` es `ancestorId` o uno de sus descendientes. */
+export function isSelfOrDescendant<T extends Node<T>>(items: T[], ancestorId: string, id: string): boolean {
   const node = findItemById(items, ancestorId);
   if (!node) return false;
   return collectAllIds([node]).has(id);
@@ -145,99 +151,85 @@ export function isSelfOrDescendant(items: IndexItem[], ancestorId: string, id: s
 
 export type DropPosition = 'before' | 'after' | 'inside';
 
-/**
- * Move `sourceId` relative to `targetId`.
- * - 'before' / 'after': becomes a sibling of the target.
- * - 'inside': becomes the last child of the target.
- * No-ops if the move is invalid (e.g. dropping a node into its own subtree).
- */
-export function moveItem(
-  items: IndexItem[],
-  sourceId: string,
-  targetId: string,
-  position: DropPosition
-): IndexItem[] {
-  if (sourceId === targetId) return items;
-  // Cannot move a node into itself or one of its descendants.
-  if (isSelfOrDescendant(items, sourceId, targetId)) return items;
-
-  return produce(items, (draft) => {
-    // Detach the source node.
-    let moved: IndexItem | null = null;
-    const detach = (arr: IndexItem[]): boolean => {
-      const idx = arr.findIndex((it) => it.id === sourceId);
-      if (idx !== -1) {
-        moved = arr.splice(idx, 1)[0];
-        return true;
-      }
-      for (const it of arr) {
-        if (it.children && detach(it.children)) {
-          if (it.children.length === 0) delete it.children;
-          return true;
-        }
-      }
-      return false;
-    };
-    detach(draft);
-    if (!moved) return;
-
-    if (position === 'inside') {
-      const target = findItemById(draft, targetId);
-      if (!target) return;
-      if (!target.children) target.children = [];
-      target.children.push(moved);
-      return;
+function insertSibling<T extends Node<T>>(items: T[], targetId: string, node: T, position: 'before' | 'after'): T[] | null {
+  const index = items.findIndex((item) => item.id === targetId);
+  if (index !== -1) {
+    const at = position === 'before' ? index : index + 1;
+    return [...items.slice(0, at), node, ...items.slice(at)];
+  }
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item.children) continue;
+    const children = insertSibling(item.children, targetId, node, position);
+    if (children) {
+      const next = [...items];
+      next[i] = { ...item, children };
+      return next;
     }
+  }
+  return null;
+}
 
-    // Insert as sibling before/after the target.
-    const insertSibling = (arr: IndexItem[]): boolean => {
-      const idx = arr.findIndex((it) => it.id === targetId);
-      if (idx !== -1) {
-        arr.splice(position === 'before' ? idx : idx + 1, 0, moved!);
-        return true;
-      }
-      for (const it of arr) {
-        if (it.children && insertSibling(it.children)) return true;
-      }
-      return false;
-    };
-    insertSibling(draft);
-  });
+/**
+ * Mueve `sourceId` respecto a `targetId`:
+ * - 'before' / 'after': queda como hermano del destino.
+ * - 'inside': queda como último hijo del destino.
+ * Si el movimiento no es válido (por ejemplo, soltar un nodo dentro de su
+ * propio subárbol) devuelve el mismo arreglo recibido.
+ */
+export function moveItem<T extends Node<T>>(items: T[], sourceId: string, targetId: string, position: DropPosition): T[] {
+  if (sourceId === targetId) return items;
+  if (isSelfOrDescendant(items, sourceId, targetId)) return items;
+  if (!findItemById(items, targetId)) return items;
+
+  const { items: without, removed } = detach(items, sourceId);
+  if (!removed) return items;
+
+  if (position === 'inside') {
+    return updateItem(without, targetId, (target) => ({
+      ...target,
+      children: [...(target.children ?? []), removed],
+    }));
+  }
+  return insertSibling(without, targetId, removed, position) ?? items;
 }
 
 const NUMBER_PREFIX = /^\s*\d+(\.\d+)*\.?\s+/;
 
-/** Strip a leading "1." / "1.2" / "1.2.3 " numbering prefix from a title. */
+/** Quita la numeración inicial ("1." / "1.2" / "1.2.3 ") de un título. */
 export function stripNumberPrefix(title: string): string {
   return title.replace(NUMBER_PREFIX, '').trim();
 }
 
-/**
- * Re-number the tree based on position: top-level => "1", "2"; children => "1.1",
- * "1.2"; grandchildren => "1.1.1"; and so on. Only titles that already start with
- * a numeric prefix are renumbered, so free-form titles are left untouched.
- */
-export function renumberIndex(items: IndexItem[]): IndexItem[] {
-  return produce(items, (draft) => {
-    const walk = (arr: IndexItem[], parentNumber: string) => {
-      arr.forEach((item, i) => {
-        const number = parentNumber ? `${parentNumber}.${i + 1}` : `${i + 1}`;
-        // Top-level sections use a trailing dot ("1. Título"); nested ones do
-        // not ("1.1 Título"), matching the book's numbering convention.
-        const label = parentNumber ? number : `${number}.`;
-        if (NUMBER_PREFIX.test(item.title)) {
-          item.title = `${label} ${stripNumberPrefix(item.title)}`.trim();
-        }
-        if (item.children && item.children.length > 0) {
-          walk(item.children, number);
-        }
-      });
-    };
-    walk(draft, '');
-  });
+/** Separa "1.2 Señales continuas" en { number: "1.2", text: "Señales continuas" }. */
+export function splitNumberPrefix(title: string): { number: string | null; text: string } {
+  const match = title.match(/^\s*(\d+(?:\.\d+)*)\.?\s+(.*)$/);
+  if (!match) return { number: null, text: title.trim() };
+  return { number: match[1], text: match[2].trim() };
 }
 
-/** Stable-ish serialization used to compare two index trees for equality. */
-export function serializeIndex(items: IndexItem[]): string {
-  return JSON.stringify(items);
+/**
+ * Renumera según la posición: "1", "2" en el primer nivel; "1.1", "1.2" en el
+ * segundo, etc. Solo toca los títulos que ya empiezan con número, y conserva
+ * el estilo de cada uno (con o sin punto final en el primer nivel).
+ */
+export function renumberIndex<T extends Node<T>>(items: T[]): T[] {
+  const walk = (nodes: T[], parentNumber: string): T[] => {
+    let changed = false;
+    const next = nodes.map((item, i) => {
+      const number = parentNumber ? `${parentNumber}.${i + 1}` : `${i + 1}`;
+      let title = item.title;
+      if (NUMBER_PREFIX.test(item.title)) {
+        const hadTrailingDot = /^\s*\d+(\.\d+)*\.\s/.test(item.title);
+        const label = hadTrailingDot ? `${number}.` : number;
+        title = `${label} ${stripNumberPrefix(item.title)}`.trim();
+      }
+      const children = item.children && item.children.length > 0 ? walk(item.children, number) : item.children;
+      if (title === item.title && children === item.children) return item;
+      changed = true;
+      return { ...item, title, ...(children ? { children } : {}) };
+    });
+    return changed ? next : nodes;
+  };
+  return walk(items, '');
 }

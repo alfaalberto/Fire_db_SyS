@@ -1,4 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="64" fill="#0a0f1a"/>
-  <text x="256" y="290" font-family="Arial, sans-serif" font-size="192" font-weight="bold" fill="#2dd4bf" text-anchor="middle">SyS</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#2563EB"/>
+  <g stroke="#fff" stroke-width="2" stroke-linecap="round">
+    <path d="M6 23.5h20" opacity=".55"/>
+    <path d="M9 23.5V17M14 23.5V9.5M19 23.5V13M24 23.5V19"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="9" cy="16" r="2"/>
+    <circle cx="14" cy="8.5" r="2"/>
+    <circle cx="19" cy="12" r="2"/>
+    <circle cx="24" cy="18" r="2"/>
+  </g>
 </svg>
