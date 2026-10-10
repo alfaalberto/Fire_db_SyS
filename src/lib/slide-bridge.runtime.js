@@ -811,28 +811,44 @@ export function slideBridgeRuntime() {
 
   // Un escenario de tamaño fijo (1280 × 720, por ejemplo) no cambia con la
   // ventana: lo que le sobra por dentro es igual se amplíe o no, así que no
-  // cuenta para decidir el tamaño. Se reconoce al medirlo con dos altos de
-  // ventana distintos; lo que contiene hereda esa condición.
+  // cuenta para decidir el tamaño. Se reconoce porque ya midió lo mismo con
+  // otro alto de ventana; lo que contiene hereda esa condición. Si con esta
+  // ventana mide distinto (un escenario 16:9 al que ya no le alcanza el
+  // ancho), ahora sí depende de ella.
   var panelMemo = typeof WeakMap === 'function' ? new WeakMap() : null;
+  var layoutPass = 0;
 
+  /** 'fixed', 'bound' (depende de la ventana) o '' (aún no se sabe). */
   function panelKind(panel, room, height) {
     if (!panelMemo) return '';
     var seen = panelMemo.get(panel);
-    if (!seen) { panelMemo.set(panel, { vh: height, room: room, kind: '' }); return ''; }
-    // Cambió de alto sin que cambiara la ventana: lo fija su contenido, no un tamaño.
-    if (seen.kind === 'fixed' && Math.abs(seen.room - room) > 2) seen.kind = 'bound';
-    if (!seen.kind) {
-      if (Math.abs(seen.vh - height) > Math.max(16, seen.vh * 0.03)) seen.kind = Math.abs(seen.room - room) <= 2 ? 'fixed' : 'bound';
-      else { seen.vh = height; seen.room = room; }
+    if (!seen) { seen = { at: [], kind: '', pass: 0 }; panelMemo.set(panel, seen); }
+    var near = Math.max(16, height * 0.03);
+    var kind = '';
+    var own = -1;
+    for (var i = 0; i < seen.at.length; i++) {
+      var entry = seen.at[i];
+      if (Math.abs(entry[0] - height) <= near) { own = i; continue; }
+      if (Math.abs(entry[1] - room) <= 2) kind = 'fixed';
+      else if (!kind) kind = 'bound';
     }
-    return seen.kind;
+    if (own === -1) {
+      seen.at.push([height, room]);
+      if (seen.at.length > 4) seen.at.shift();
+    } else {
+      seen.at[own][0] = height;
+      seen.at[own][1] = room;
+    }
+    seen.kind = kind;
+    seen.pass = layoutPass;
+    return kind;
   }
 
   function insideFixed(panel) {
     if (!panelMemo) return false;
     for (var node = panel.parentElement; node && node !== document.body; node = node.parentElement) {
       var seen = panelMemo.get(node);
-      if (seen && seen.kind === 'fixed' && Math.abs(seen.room - node.clientHeight) <= 2) return true;
+      if (seen && seen.pass === layoutPass && seen.kind === 'fixed') return true;
     }
     return false;
   }
@@ -1007,6 +1023,7 @@ export function slideBridgeRuntime() {
     var soft = 0;
     var clip = 0;
     var panels = 0;
+    layoutPass += 1;
     for (i = 0; i < count && panels < 12; i++) {
       var panel = all[i];
       var room = panel.clientHeight;
