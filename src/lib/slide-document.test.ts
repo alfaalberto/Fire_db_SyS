@@ -108,12 +108,13 @@ describe('buildSlideSrcDoc', () => {
     expect(out).toContain('<html lang="es" data-theme="dark">');
     expect(out).toContain('<title>Tema &lt;1&gt;</title>');
     expect(out).toContain('<main class="sys-fragment"><h1>Hola</h1>');
-    expect(out).toContain('https://curso.example/katex/katex.min.js');
+    expect(out).toContain('<script defer src="https://curso.example/katex/katex.min.js">');
     expect(out).toContain('"fragment":true');
   });
 
   it('un fragmento sin fórmulas no carga KaTeX', () => {
-    expect(buildSlideSrcDoc('<p>Solo texto</p>', options)).not.toContain('katex.min.js');
+    // El puente lo pide por su cuenta solo si aparece TeX en crudo.
+    expect(buildSlideSrcDoc('<p>Solo texto</p>', options)).not.toContain('<script defer src="https://curso.example/katex/katex.min.js">');
   });
 
   it('en modo sin confianza quita los scripts del contenido pero conserva el puente', () => {

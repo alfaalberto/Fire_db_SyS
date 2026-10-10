@@ -36,8 +36,16 @@ interface SlideFrameProps {
   onRuntimeError?: (message: string) => void;
   /** Fórmulas que la presentación dejó en crudo y convirtió la plataforma. */
   onMathRescue?: (count: number) => void;
+  /** `false` la deja a su tamaño natural aunque no quepa a lo ancho. */
+  fit?: boolean;
+  onFit?: (state: FitState) => void;
+}
+
+export interface FitState {
   /** Escala con la que se muestra (1 = tamaño natural). */
-  onScale?: (scale: number) => void;
+  scale: number;
+  /** El contenido se sale a lo ancho: tiene sentido ofrecer el ajuste. */
+  needed: boolean;
 }
 
 const TRUSTED = process.env.NEXT_PUBLIC_TRUST_SLIDES !== 'false';
@@ -53,6 +61,8 @@ const MIN_SCALE = 0.6;
 const FIT_TOLERANCE = 1.03;
 /** Ajustes seguidos permitidos mientras la presentación se reacomoda. */
 const MAX_FIT_STEPS = 3;
+/** Si agrandar no acorta lo que sobresale al menos esto, no tiene arreglo. */
+const FIT_PROGRESS = 0.85;
 
 function newToken(): string {
   const bytes = new Uint8Array(12);
@@ -72,7 +82,24 @@ function newToken(): string {
  * en lugar de recortada.
  */
 export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function SlideFrame(
-  { html, title, theme, presenting = false, bridge = true, className, onProgress, onEdge, onJump, onEscape, onFileDrag, onFiles, onRuntimeError, onMathRescue, onScale },
+  {
+    html,
+    title,
+    theme,
+    presenting = false,
+    bridge = true,
+    fit = true,
+    className,
+    onProgress,
+    onEdge,
+    onJump,
+    onEscape,
+    onFileDrag,
+    onFiles,
+    onRuntimeError,
+    onMathRescue,
+    onFit,
+  },
   ref,
 ) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -84,7 +111,9 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
   // Ancho disponible y ancho con el que se dibuja el iframe (null = el natural).
   const [boxWidth, setBoxWidth] = useState(0);
   const [fitWidth, setFitWidth] = useState<number | null>(null);
-  const fit = useRef({ box: 0, width: null as number | null, steps: 0 });
+  const [fitNeeded, setFitNeeded] = useState(false);
+  const fitState = useRef({ box: 0, width: null as number | null, steps: 0, over: 0, gaveUp: false, enabled: fit });
+  fitState.current.enabled = fit;
 
   // Valores con los que se construye el documento; los cambios posteriores
   // viajan por mensaje (ver efectos de abajo).
@@ -106,8 +135,8 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
     [html, bridge],
   );
 
-  const handlers = useRef({ onProgress, onEdge, onJump, onEscape, onFileDrag, onFiles, onRuntimeError, onMathRescue, onScale });
-  handlers.current = { onProgress, onEdge, onJump, onEscape, onFileDrag, onFiles, onRuntimeError, onMathRescue, onScale };
+  const handlers = useRef({ onProgress, onEdge, onJump, onEscape, onFileDrag, onFiles, onRuntimeError, onMathRescue, onFit });
+  handlers.current = { onProgress, onEdge, onJump, onEscape, onFileDrag, onFiles, onRuntimeError, onMathRescue, onFit };
   const live = useRef({ theme, presenting });
   live.current = { theme, presenting };
 
@@ -119,10 +148,15 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
     return true;
   }, []);
 
+  /** Vuelve al tamaño natural y olvida lo medido. */
   const resetFit = useCallback(() => {
-    fit.current.width = null;
-    fit.current.steps = 0;
+    const state = fitState.current;
+    state.width = null;
+    state.steps = 0;
+    state.over = 0;
+    state.gaveUp = false;
     setFitWidth(null);
+    setFitNeeded(false);
   }, []);
 
   useEffect(() => {
@@ -138,8 +172,8 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
     if (!element || typeof ResizeObserver !== 'function') return;
     const observer = new ResizeObserver((entries) => {
       const width = Math.round(entries[0].contentRect.width);
-      if (width === fit.current.box) return;
-      fit.current.box = width;
+      if (width === fitState.current.box) return;
+      fitState.current.box = width;
       setBoxWidth(width);
       resetFit();
     });
@@ -200,22 +234,36 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
         case 'layout': {
           const need = Number(data.need);
           const width = Number(data.width);
-          const state = fit.current;
-          if (!(need > 0) || !(width > 0) || state.box <= 0) break;
+          const state = fitState.current;
+          if (!(need > 0) || !(width > 0) || state.box <= 0 || state.gaveUp) break;
           const current = state.width ?? state.box;
           // Medida tomada con otro ancho: llegó tarde, tras un cambio de tamaño.
           if (Math.abs(width - current) > 2) break;
-          if (need <= width * FIT_TOLERANCE || state.steps >= MAX_FIT_STEPS) break;
+          if (need <= width * FIT_TOLERANCE) break;
+          setFitNeeded(true);
+          if (!state.enabled) break;
+          const over = need - width;
+          if (state.width !== null && over >= state.over * FIT_PROGRESS) {
+            // Agrandar no acortó lo que sobresale: mide según la ventana (un
+            // `97vw` más relleno) y nunca cabrá. Se deja a su tamaño natural.
+            state.gaveUp = true;
+            state.width = null;
+            setFitWidth(null);
+            setFitNeeded(false);
+            break;
+          }
+          if (state.steps >= MAX_FIT_STEPS) break;
           const next = Math.min(Math.ceil(need), Math.floor(state.box / MIN_SCALE));
           if (next <= current + 4) break;
           state.width = next;
           state.steps += 1;
+          state.over = over;
           setFitWidth(next);
           break;
         }
         case 'relayout':
           // Las tipografías llegaron después de medir: se mide otra vez desde cero.
-          if (fit.current.width !== null) resetFit();
+          resetFit();
           break;
       }
     };
@@ -227,12 +275,24 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
     if (readyRef.current) send({ t: 'mode', presenting });
   }, [presenting, send]);
 
-  const scaled = fitWidth !== null && boxWidth > 0 && fitWidth > boxWidth + 1;
+  // Al activar o desactivar el ajuste se parte del tamaño natural y se pide
+  // al puente que mida otra vez.
+  const firstFit = useRef(true);
+  useEffect(() => {
+    if (firstFit.current) {
+      firstFit.current = false;
+      return;
+    }
+    resetFit();
+    if (readyRef.current) send({ t: 'measure' });
+  }, [fit, resetFit, send]);
+
+  const scaled = fit && fitWidth !== null && boxWidth > 0 && fitWidth > boxWidth + 1;
   const scale = scaled ? boxWidth / fitWidth : 1;
 
   useEffect(() => {
-    handlers.current.onScale?.(scale);
-  }, [scale]);
+    handlers.current.onFit?.({ scale, needed: fitNeeded });
+  }, [scale, fitNeeded]);
 
   useEffect(() => {
     if (readyRef.current) send({ t: 'theme', theme });

@@ -60,6 +60,38 @@ export function slideBridgeRuntime() {
 
   function on(target, type, fn, options) { nativeAdd.call(target, type, fn, options); }
 
+  // KaTeX de la presentación (auto-render). Se anota cuándo hace su repaso y
+  // con qué opciones: así la plataforma no se le adelanta y, si después tiene
+  // que convertir lo que dejó en crudo, lo hace con su misma configuración.
+  var deckRender = null;
+  var deckProxy = null;
+  var deckOptions = null;
+  var deckCalls = 0;
+
+  function makeRenderProxy(fn) {
+    return function (el, options) {
+      if (!mathBusy) {
+        deckCalls += 1;
+        if (options && typeof options === 'object') deckOptions = options;
+        if (deckCalls === 1) scheduleMath(350);
+      }
+      return fn.apply(this, arguments);
+    };
+  }
+
+  try {
+    Object.defineProperty(window, 'renderMathInElement', {
+      configurable: true,
+      enumerable: true,
+      get: function () { return deckProxy || undefined; },
+      set: function (value) {
+        var usable = typeof value === 'function';
+        deckRender = usable ? value : null;
+        deckProxy = usable ? makeRenderProxy(value) : null;
+      }
+    });
+  } catch (e) {}
+
   /* ------------------------------------------------------------------ */
   /* Detección de láminas                                                */
   /* ------------------------------------------------------------------ */
@@ -342,8 +374,8 @@ export function slideBridgeRuntime() {
    * de control: lo que cambia en ambas es animación; lo que cambia solo en la
    * primera es la respuesta a la tecla.
    */
-  function watch(root, done) {
-    if (!root || typeof MutationObserver !== 'function') { setTimeout(function () { done(false); }, 140); return; }
+  function watch(root, act, done) {
+    if (!root || typeof MutationObserver !== 'function') { act(); setTimeout(function () { done(false); }, 140); return; }
     var first = [];
     var second = [];
     var bucket = first;
@@ -354,7 +386,10 @@ export function slideBridgeRuntime() {
         if (target && bucket.indexOf(target) === -1 && bucket.length < 400) bucket.push(target);
       }
     });
-    observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-hidden'] });
+    observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-hidden'] });
+    // Primero se observa y después se actúa: una tecla sintética o un clic
+    // cambian la página en el acto.
+    act();
     setTimeout(function () {
       if (first.length === 0) { observer.disconnect(); done(false); return; }
       bucket = second;
@@ -386,8 +421,7 @@ export function slideBridgeRuntime() {
       }
       // Puede quedar un paso por revelar en la última lámina: se deja actuar
       // a la presentación y después se decide.
-      deliver(strategy, dir, ev);
-      watch(p.el, function (changed) {
+      watch(p.el, function () { deliver(strategy, dir, ev); }, function (changed) {
         var q = detect();
         if (q && q.index !== p.index) { post({ t: 'edge', dir: dir }); return; }
         if (changed) { report(false); return; }
@@ -397,12 +431,23 @@ export function slideBridgeRuntime() {
     }
 
     if (!p) {
+      // Sin láminas a la vista es una página única (un laboratorio, un
+      // documento continuo): la tecla lleva a la presentación vecina. No se
+      // pulsan sus botones «siguiente», que ahí mueven otra cosa (la muestra
+      // de una simulación). Solo si la página maneja el teclado por su cuenta
+      // se le entrega la tecla, y se sigue de largo cuando no reacciona.
       var button = findNavButton(dir);
+      if (strategy === 'click') strategy = hasKeyHandlers() ? (key === 'ArrowRight' || key === 'ArrowLeft' ? 'native' : 'synth') : 'none';
       if (strategy === 'none' || (button && isDisabled(button))) {
         swallow(ev);
         post({ t: 'edge', dir: dir });
         return;
       }
+      watch(document.body, function () { deliver(strategy, dir, ev); }, function (changed) {
+        if (changed) { report(false); layoutSoon(300); return; }
+        post({ t: 'edge', dir: dir });
+      });
+      return;
     }
 
     if (strategy !== 'none') deliver(strategy, dir, ev);
@@ -424,6 +469,20 @@ export function slideBridgeRuntime() {
   var MATH_HINT = /\\\(|\\\[|\$\$|\$[^$\n]{1,200}\$/;
   var MATH_SKIP_TAG = /^(script|style|noscript|textarea|pre|code|option|select|template|svg|canvas|math|iframe)$/i;
   var MATH_SKIP_CLASS = /(^|\s)(katex|katex-display|katex-error|MathJax|no-math)(\s|$)/;
+  var MATH_SKIP_TAGS = ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option', 'select', 'template', 'svg', 'canvas', 'math', 'iframe'];
+  var MATH_SKIP_CLASSES = ['katex', 'katex-error', 'no-math'];
+  var MATH_DELIMITERS = [
+    { left: '$$', right: '$$', display: true },
+    { left: '\\(', right: '\\)', display: false },
+    { left: '\\[', right: '\\]', display: true },
+    { left: '$', right: '$', display: false }
+  ];
+  // Las mismas abreviaturas que ofrecía la plataforma anterior.
+  var MATH_MACROS = {
+    '\\R': '\\mathbb{R}', '\\N': '\\mathbb{N}', '\\Z': '\\mathbb{Z}', '\\C': '\\mathbb{C}',
+    '\\F': '\\mathcal{F}', '\\Laplace': '\\mathcal{L}', '\\fourier': '\\mathfrak{F}',
+    '\\Re': '\\operatorname{Re}', '\\Im': '\\operatorname{Im}'
+  };
   var mathTimer = 0;
   var mathDue = 0;
   var mathBusy = false;
@@ -431,13 +490,23 @@ export function slideBridgeRuntime() {
   var mathLoading = false;
   var mathRescued = 0;
   var pageLoaded = false;
+  // Venció el plazo que se da a la presentación para hacer su propio repaso.
+  var graceOver = false;
 
   // 1 = aceptar, 2 = descartar con todo su contenido, 3 = seguir hacia dentro.
   function mathFilter(node) {
     if (node.nodeType === 3) return MATH_HINT.test(node.nodeValue || '') ? 1 : 2;
     if (MATH_SKIP_TAG.test(node.nodeName)) return 2;
     var cls = className(node);
-    return cls && MATH_SKIP_CLASS.test(cls) ? 2 : 3;
+    if (cls && MATH_SKIP_CLASS.test(cls)) return 2;
+    // Lo que la propia presentación pidió a KaTeX dejar como está.
+    var own = deckOptions;
+    if (own && own.ignoredTags && own.ignoredTags.indexOf && own.ignoredTags.indexOf(node.nodeName.toLowerCase()) !== -1) return 2;
+    if (cls && own && own.ignoredClasses && own.ignoredClasses.indexOf) {
+      var tokens = cls.split(/\s+/);
+      for (var i = 0; i < tokens.length; i++) if (tokens[i] && own.ignoredClasses.indexOf(tokens[i]) !== -1) return 2;
+    }
+    return 3;
   }
 
   function rawMath(limit) {
@@ -450,26 +519,44 @@ export function slideBridgeRuntime() {
     return found;
   }
 
+  function mergeNames(base, extra) {
+    var out = base.slice();
+    for (var i = 0; extra && i < extra.length; i++) {
+      if (typeof extra[i] === 'string' && out.indexOf(extra[i]) === -1) out.push(extra[i]);
+    }
+    return out;
+  }
+
+  /** Opciones del repaso: las de la presentación, más los delimitadores habituales. */
   function mathOptions() {
-    return {
-      delimiters: [
-        { left: '$$', right: '$$', display: true },
-        { left: '\\(', right: '\\)', display: false },
-        { left: '\\[', right: '\\]', display: true },
-        { left: '$', right: '$', display: false }
-      ],
-      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option', 'select', 'template', 'svg', 'canvas', 'math', 'iframe'],
-      ignoredClasses: ['katex', 'katex-error', 'no-math'],
-      throwOnError: false,
-      strict: 'ignore',
-      trust: true,
-      // Las mismas abreviaturas que ofrecía la plataforma anterior.
-      macros: {
-        '\\R': '\\mathbb{R}', '\\N': '\\mathbb{N}', '\\Z': '\\mathbb{Z}', '\\C': '\\mathbb{C}',
-        '\\F': '\\mathcal{F}', '\\Laplace': '\\mathcal{L}', '\\fourier': '\\mathfrak{F}',
-        '\\Re': '\\operatorname{Re}', '\\Im': '\\operatorname{Im}'
+    var own = deckOptions || {};
+    var options = { strict: 'ignore', trust: true };
+    var key;
+    for (key in own) if (Object.prototype.hasOwnProperty.call(own, key)) options[key] = own[key];
+    options.throwOnError = false;
+
+    var delimiters = [];
+    var seen = {};
+    var lists = [own.delimiters, MATH_DELIMITERS];
+    for (var l = 0; l < lists.length; l++) {
+      for (var i = 0; lists[l] && i < lists[l].length; i++) {
+        var item = lists[l][i];
+        if (!item || typeof item.left !== 'string' || typeof item.right !== 'string' || seen[item.left]) continue;
+        seen[item.left] = true;
+        delimiters.push(item);
       }
-    };
+    }
+    // KaTeX exige que `$` vaya después de `$$`.
+    delimiters.sort(function (a, b) { return (a.left === '$' ? 1 : 0) - (b.left === '$' ? 1 : 0); });
+    options.delimiters = delimiters;
+    options.ignoredTags = mergeNames(MATH_SKIP_TAGS, own.ignoredTags);
+    options.ignoredClasses = mergeNames(MATH_SKIP_CLASSES, own.ignoredClasses);
+
+    var macros = {};
+    for (key in MATH_MACROS) macros[key] = MATH_MACROS[key];
+    if (own.macros && typeof own.macros === 'object') for (key in own.macros) macros[key] = own.macros[key];
+    options.macros = macros;
+    return options;
   }
 
   function addScript(src, done) {
@@ -487,7 +574,11 @@ export function slideBridgeRuntime() {
     if (mathLoading || !base) return;
     mathLoading = true;
     var autoRender = function () {
-      addScript(base + '/katex/contrib/auto-render.min.js', function (ok) { if (ok) scheduleMath(0); });
+      addScript(base + '/katex/contrib/auto-render.min.js', function (ok) {
+        if (!ok) return;
+        graceOver = true;
+        scheduleMath(0);
+      });
     };
     if (window.katex) { autoRender(); return; }
     var link = document.createElement('link');
@@ -500,10 +591,20 @@ export function slideBridgeRuntime() {
   function sweepMath() {
     mathTimer = 0;
     if (mathBusy || window.MathJax) return;
+    var render = deckRender;
+    if (!render) {
+      // Pudo definirla de un modo que esquiva el seguimiento de arriba.
+      var plain = window.renderMathInElement;
+      if (typeof plain === 'function') render = plain;
+    }
+    if (!render) {
+      if (pageLoaded && rawMath(1).length) loadMath();
+      return;
+    }
+    // Trae su KaTeX y todavía no ha hecho su repaso: se le espera.
+    if (deckCalls === 0 && !graceOver) return;
     var nodes = rawMath(400);
     if (!nodes.length) return;
-    var render = window.renderMathInElement;
-    if (typeof render !== 'function') { if (pageLoaded) loadMath(); return; }
 
     var parents = [];
     var texts = [];
@@ -585,7 +686,7 @@ export function slideBridgeRuntime() {
   var lastLayout = '';
   var layoutTimer = 0;
 
-  function boxInfo(node, memo, client) {
+  function boxInfo(node, memo, edge) {
     var known = memo ? memo.get(node) : null;
     if (known) return known;
     var cs = getComputedStyle(node);
@@ -594,7 +695,7 @@ export function slideBridgeRuntime() {
     known = {
       hidden: cs.visibility === 'hidden',
       // Transparente, o colocado a mano y sobresaliendo: adorno o panel oculto.
-      gone: parseFloat(cs.opacity) < 0.05 || (placed && (box.right > client + 2 || box.left < -2)),
+      gone: parseFloat(cs.opacity) < 0.05 || (placed && (box.right > edge + 2 || box.left < -2)),
       clips: cs.overflowX !== 'visible',
       left: box.left,
       right: box.right
@@ -604,54 +705,58 @@ export function slideBridgeRuntime() {
   }
 
   /** Ancho con el que `el` dejaría de estar cortado por la ventana; 0 si no lo está. */
-  function cutExtent(el, memo, client) {
-    var own = boxInfo(el, memo, client);
+  function cutExtent(el, memo, edge) {
+    var own = boxInfo(el, memo, edge);
     if (own.hidden || own.gone) return 0;
     var left = own.left;
     var right = own.right;
     for (var node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
-      var info = boxInfo(node, memo, client);
+      var info = boxInfo(node, memo, edge);
       if (info.gone) return 0;
       if (info.clips) {
         if (info.right < right) right = info.right;
         if (info.left > left) left = info.left;
       }
     }
-    var over = Math.max(0, right - client) + Math.max(0, -left);
-    return over > 2 ? client + over : 0;
+    var over = Math.max(0, right - edge) + Math.max(0, -left);
+    return over > 2 ? edge + over : 0;
   }
 
   function neededWidth() {
+    // El borde es el de la ventana completa, no el del área sin la barra de
+    // desplazamiento: un elemento de `100vw` siempre queda bajo esa barra y
+    // agrandar la ventana no lo arregla.
     var width = window.innerWidth;
     var root = document.documentElement;
     var body = document.body;
     if (!body || width < 40) return width;
-    var client = root.clientWidth || width;
-    if (Math.max(root.scrollWidth, body.scrollWidth) <= client + 8) return width;
+    if (Math.max(root.scrollWidth, body.scrollWidth) <= width + 8) return width;
 
     var memo = typeof WeakMap === 'function' ? new WeakMap() : null;
-    var limit = client / MIN_FIT;
-    var need = client;
+    var limit = width / MIN_FIT;
+    var need = width;
     var all = body.getElementsByTagName('*');
     var checked = 0;
     for (var i = 0; i < all.length && i < 8000 && checked < 400; i++) {
       var el = all[i];
       var rect = el.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) continue;
-      if (rect.right <= client + 2 && rect.left >= -2) continue;
+      if (rect.right <= width + 2 && rect.left >= -2) continue;
       // Enteramente fuera: solo cuenta si su contenedor empieza dentro (el
       // resto de una fila de botones); si no, es un panel fuera de pantalla.
-      if (rect.left >= client - 2 || rect.right <= 2) {
+      if (rect.left >= width - 2 || rect.right <= 2) {
         var holder = el.parentElement;
         if (!holder || holder === body) continue;
         var around = holder.getBoundingClientRect();
-        if (around.left >= client - 2 || around.right <= 2) continue;
+        if (around.left >= width - 2 || around.right <= 2) continue;
       }
       checked += 1;
-      var extent = cutExtent(el, memo, client);
+      var extent = cutExtent(el, memo, width);
       if (extent > need && extent <= limit) need = extent;
     }
-    return need > client + 2 ? Math.ceil(need + (width - client)) : width;
+    if (need <= width + 2) return width;
+    // Para que el contenido quepa junto a la barra de desplazamiento vertical.
+    return Math.ceil(need + Math.max(0, width - (root.clientWidth || width)));
   }
 
   // El ancho se mide con las tipografías ya cargadas: con las de reserva el
@@ -793,6 +898,8 @@ export function slideBridgeRuntime() {
     if (pageLoaded) return;
     pageLoaded = true;
     scheduleMath(150);
+    // Plazo para que la presentación haga su propio repaso antes de suplirlo.
+    setTimeout(function () { graceOver = true; scheduleMath(0); }, 1200);
     settleLayout();
   }
 
@@ -800,7 +907,6 @@ export function slideBridgeRuntime() {
     post({ t: 'ready', title: document.title || '' });
     report(true);
     watchMath();
-    scheduleMath(1500);
     // Por si `load` no llega (un recurso que nunca termina de descargar).
     if (document.readyState === 'complete') loaded();
     else setTimeout(loaded, 6000);

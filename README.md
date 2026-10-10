@@ -1,55 +1,150 @@
 # Señales y Sistemas — Plataforma Académica
 
-Plataforma interactiva para el curso de **Señales y Sistemas** basada en *Oppenheim, Willsky y Nawab*.
+Plataforma para publicar y proyectar las presentaciones interactivas del curso de
+Señales y Sistemas (Oppenheim, Willsky y Nawab). Los alumnos consultan el temario
+y abren las presentaciones; el docente las sube, las ordena y las proyecta en clase.
 
-## Stack
+- **Next.js 15** (App Router), React 18 y Tailwind, desplegada en **Firebase App Hosting**.
+- **Firestore** guarda el curso. Quien solo consulta lee por REST, sin descargar el SDK de Firebase.
+- **Firebase Authentication** (Google) identifica al docente; solo él puede escribir.
 
-- **Next.js 15** + React 18 + TypeScript
-- **Tailwind CSS** con tema oscuro teal/cyan premium
-- **Firebase Firestore** para persistencia de diapositivas
-- **shadcn/ui** componentes accesibles con Radix UI
-- **KaTeX / MathJax** para renderizado matemático
-- **PWA** con service worker para soporte offline
+## Puesta en marcha
 
-## Inicio rápido
+Requiere Node 20 o posterior.
 
 ```bash
-# 1. Instalar dependencias
-npm install
-
-# 2. Configurar variables de entorno
-cp .env.example .env
-# Edita .env con tus credenciales de Firebase
-
-# 3. Ejecutar en desarrollo
-npm run dev
+npm ci
+npm run dev          # http://localhost:9004
 ```
 
-Abre [http://localhost:3000](http://localhost:3000).
+Los identificadores del proyecto de Firebase están en `apphosting.yaml` y son los
+que usa el código por omisión. Para apuntar a otro proyecto, copia `.env.example`
+a `.env.local` y cambia los valores.
 
-## Scripts
-
-| Comando | Descripción |
-|---------|-------------|
+| Comando | Qué hace |
+| --- | --- |
 | `npm run dev` | Servidor de desarrollo |
-| `npm run build` | Build de producción |
-| `npm run start` | Servidor de producción |
-| `npm run lint` | Linter |
+| `npm run build` / `npm start` | Compilación y servidor de producción |
+| `npm run check` | Tipos, ESLint y pruebas unitarias |
+| `npm run test:e2e` | Pruebas de extremo a extremo (necesita `npm run build` antes) |
 
-## Estructura del proyecto
+## Acceso del docente (se configura una sola vez)
+
+1. **Consola de Firebase → Authentication → Método de acceso:** habilita **Google**.
+   En *Configuración → Dominios autorizados* debe estar el dominio de la plataforma.
+2. **Firestore → colección `admins`:** crea un documento cuyo **ID sea el correo del
+   docente en minúsculas** (por ejemplo `nombre@ipn.mx`). El contenido no importa.
+   Para dar acceso a otra persona, añade otro documento; para quitarlo, bórralo.
+3. **Publica las reglas** de `firestore.rules`: pégalas en *Firestore → Reglas* y pulsa
+   «Publicar», o ejecuta `firebase deploy --only firestore:rules`.
+
+Con las reglas publicadas cualquiera puede leer el curso y solo las cuentas de
+`admins` (con correo verificado) pueden modificarlo. Las reglas se escribieron para
+este esquema, pero conviene probarlas con el simulador de reglas de la consola
+antes de confiarles el contenido.
+
+La clave de API de Firebase es pública por diseño. Aun así, en Google Cloud →
+*Credenciales* conviene restringirla a los dominios de la plataforma.
+
+## Migrar desde la versión anterior
+
+La versión anterior guardaba todo el curso en un solo paquete (`meta/fullIndex`),
+que cada visitante descargaba completo. La actual separa el temario
+(`meta/outline`) del contenido de cada tema (`slides/{id}`).
+
+1. En la versión anterior, pulsa «Guardar» y **exporta un respaldo**.
+2. Despliega esta versión. Sigue leyendo el formato anterior, así que el curso se
+   ve igual desde el primer momento.
+3. Entra con la cuenta de docente → menú **Docente → Mantenimiento → «Migrar al
+   formato nuevo»**. No borra nada: copia cada tema a su documento y crea el temario.
+4. En el mismo cuadro, «Analizar» muestra cuánto ocupa el formato anterior y permite
+   borrar primero las copias sobrantes y, ya migrado y con respaldo, todo lo demás.
+
+## Editar el curso
+
+Con sesión de docente aparece **Docente → Modo edición**.
+
+- Los cambios se guardan en un **borrador en este navegador**; los alumnos no ven
+  nada hasta pulsar **Publicar**. «Descartar» vuelve a lo publicado.
+- **Temario:** arrastrar para reordenar, y el menú «⋯» de cada tema para renombrar,
+  añadir subtemas o eliminar. La numeración se actualiza sola.
+- **Presentaciones:** subir uno o varios `.html`, arrastrarlos sobre el tema, pegar
+  el código, reemplazar, reordenar, descargar o eliminar.
+- **Docente → Exportar / Importar respaldo:** un archivo JSON con todo el curso.
+- Si dos personas editan a la vez, al publicar se avisa del conflicto en lugar de
+  sobrescribir.
+
+En modo edición, cada presentación muestra los avisos de su revisión: texto fuera
+del documento (por ejemplo, el guion que lo generó), falta de `<title>`, recursos
+`http://`, errores de ejecución, fórmulas que dependen de la plataforma para
+convertirse y si se está mostrando reducida porque no cabe a lo ancho.
+
+## Cómo se muestran las presentaciones
+
+Cada presentación es un archivo HTML completo, con sus estilos, su KaTeX y su
+navegación. Se muestra **tal cual** dentro de un `iframe` aislado, sin hojas de
+estilo ni guiones de la plataforma mezclados con los suyos: lo que se ve al abrir
+el archivo en el navegador es lo que ve el alumno.
+
+Lo único que se le añade es un puente (`src/lib/slide-bridge.runtime.js`) que:
+
+- detecta la lámina actual para el indicador «3 / 11»;
+- en **modo presentación**, hace que ← / → y RePág / AvPág (el presentador
+  inalámbrico) avancen la presentación con su propio mecanismo y, al terminar,
+  pasen a la siguiente. `Ctrl` + flecha salta de presentación y `Esc` termina;
+- resuelve dentro del documento los enlaces `#ancla`;
+- convierte con KaTeX las fórmulas que el archivo deja en crudo (delimitadores que
+  su configuración no reconoce, texto añadido después de su único repaso, o KaTeX
+  ausente). Una presentación que se convierte sola no se toca;
+- mide si el contenido se sale a lo ancho (una barra de botones en el teléfono) y,
+  en ese caso, la plataforma la dibuja con el ancho que necesita y la reduce hasta
+  caber, con un mínimo del 60 %;
+- reenvía los errores de ejecución, que el docente ve en modo edición.
+
+Entrar o salir del modo presentación no recarga la presentación ni pierde la lámina.
+
+Los fragmentos sueltos (`<h1>…</h1><p>…</p>`, sin `<html>`) reciben una plantilla
+de la plataforma con tipografía, tema claro u oscuro y KaTeX local.
+
+### Recomendaciones para los archivos
+
+- Empezar por `<!DOCTYPE html>` e incluir `<title>`: es el nombre de la pestaña.
+- Subir el archivo `.html`, no el guion que lo genera.
+- Cargar los recursos por `https://`.
+- Si se usan `\(…\)` o `$…$`, declarar esos delimitadores en la llamada a
+  `renderMathInElement`; en una cadena de JavaScript se escriben `'\\('` y `'\\)'`.
+- No depender de `localStorage`: dentro del `iframe` aislado no está disponible.
+
+## Seguridad
+
+- El `iframe` usa `sandbox` **sin** `allow-same-origin`: el código de una
+  presentación no puede leer la sesión del docente, el almacenamiento ni la página
+  de la plataforma.
+- Solo se escribe en Firestore con una sesión de `admins`; las reglas rechazan lo demás.
+- `NEXT_PUBLIC_TRUST_SLIDES=false` quita los guiones de las presentaciones antes de
+  mostrarlas (pierden su interactividad), por si alguna vez se publica contenido ajeno.
+
+## Estructura
 
 ```
-src/
-├── app/            # Layout, page, error (App Router)
-├── components/     # Componentes core y UI (shadcn)
-├── hooks/          # Hooks personalizados
-└── lib/            # Utils, tipos, Firebase, constantes (temario)
-public/
-├── sw.js           # Service worker
-├── manifest.json   # PWA manifest
-└── slide-iframe.css
+src/app/                  Página, tipografías y estilos globales
+src/components/           Interfaz: temario, visor, modo presentación, edición
+src/components/admin/     Menú del docente, editor de HTML y mantenimiento
+src/hooks/                Estado del curso, sesión y ruta (#/t/<tema>/<n>)
+src/lib/data/             Lectura por REST, caché en IndexedDB y almacén del curso
+src/lib/admin/            Sesión de Google y publicación (carga diferida)
+src/lib/slide-*.ts|js     Documento que recibe el iframe y puente
+src/lib/tree.ts           Operaciones sobre el temario
+e2e/                      Pruebas de extremo a extremo
+firestore.rules           Reglas de acceso
+public/katex/             KaTeX servido por la plataforma
 ```
 
-## Licencia
+## Pruebas
 
-Uso académico.
+- `npm test`: pruebas unitarias (Vitest) de temario, formato de datos, publicación
+  y construcción del documento.
+- `npm run test:e2e`: Playwright contra `next start`, con Firestore y la sesión
+  simulados en memoria; nunca tocan la base de datos real. Cubren la lectura, el
+  modo presentación, la edición y publicación, la migración, el teléfono, las
+  fórmulas en crudo y el ajuste de ancho.

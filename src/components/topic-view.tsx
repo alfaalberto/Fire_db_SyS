@@ -9,6 +9,8 @@ import {
   ChevronRight,
   Download,
   Link2,
+  Maximize2,
+  Minimize2,
   MoreHorizontal,
   PanelLeft,
   Play,
@@ -38,7 +40,7 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DeckTabs, type DeckEditing } from './deck-tabs';
 import { PresenterHud } from './presenter-hud';
-import { SlideFrame, type DeckProgress, type SlideFrameHandle } from './slide-frame';
+import { SlideFrame, type DeckProgress, type FitState, type SlideFrameHandle } from './slide-frame';
 
 interface TopicViewProps {
   store: CourseStore;
@@ -59,6 +61,9 @@ interface TopicViewProps {
 const DeckEditor = dynamic(() => import('./admin/deck-editor').then((mod) => mod.DeckEditor), { ssr: false });
 
 const LAST_KEY = 'sys.ultimo';
+/** "0" si el lector prefiere ver las presentaciones a su tamaño natural. */
+const FIT_KEY = 'sys.ajuste';
+const NO_FIT: FitState = { scale: 1, needed: false };
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
 /** Huella barata del HTML: cambia la clave del iframe cuando cambia el contenido. */
@@ -126,7 +131,8 @@ export function TopicView({
   const [progress, setProgress] = useState<DeckProgress | null>(null);
   const [runtimeErrors, setRuntimeErrors] = useState<string[]>([]);
   const [mathRescued, setMathRescued] = useState(0);
-  const [frameScale, setFrameScale] = useState(1);
+  const [fitState, setFitState] = useState<FitState>(NO_FIT);
+  const [fitOn, setFitOn] = useState(true);
   const [hud, setHud] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [announcement, setAnnouncement] = useState<string | null>(null);
@@ -167,8 +173,27 @@ export function TopicView({
     setProgress(null);
     setRuntimeErrors([]);
     setMathRescued(0);
-    setFrameScale(1);
+    setFitState(NO_FIT);
   }, [frameKey]);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(FIT_KEY) === '0') setFitOn(false);
+    } catch {
+      // Sin almacenamiento se usa el ajuste automático.
+    }
+  }, []);
+
+  const toggleFit = useCallback(() => {
+    setFitOn((on) => {
+      try {
+        localStorage.setItem(FIT_KEY, on ? '0' : '1');
+      } catch {
+        // La preferencia vale solo para esta visita.
+      }
+      return !on;
+    });
+  }, []);
 
   /* --------------------------- presentación --------------------------- */
 
@@ -317,11 +342,13 @@ export function TopicView({
             : `${mathRescued} fórmulas quedan en crudo al abrir el archivo por separado; la plataforma las convierte. Revisa los delimitadores que reconoce su KaTeX.`,
       });
     }
-    if (frameScale < 0.995) {
-      list.push({ key: 'scale', message: `No cabe a lo ancho en esta ventana: se muestra reducida al ${Math.round(frameScale * 100)} %.` });
+    if (fitState.scale < 0.995) {
+      list.push({ key: 'scale', message: `No cabe a lo ancho en esta ventana: se muestra reducida al ${Math.round(fitState.scale * 100)} %.` });
+    } else if (fitState.needed) {
+      list.push({ key: 'scale', message: 'No cabe a lo ancho en esta ventana y el ajuste está desactivado: parte del contenido queda fuera.' });
     }
     return list;
-  }, [activeReport, editMode, frameScale, mathRescued]);
+  }, [activeReport, editMode, fitState, mathRescued]);
 
   const commitDecks = useCallback(
     (next: string[], focusIndex?: number) => {
@@ -454,7 +481,8 @@ export function TopicView({
         onFiles={canEdit ? (files) => void addFiles(files, 'append') : undefined}
         onRuntimeError={(message) => setRuntimeErrors((list) => (list.length >= 8 || list.includes(message) ? list : [...list, message]))}
         onMathRescue={setMathRescued}
-        onScale={setFrameScale}
+        fit={fitOn}
+        onFit={setFitState}
       />
     );
   }
@@ -551,6 +579,12 @@ export function TopicView({
               <DropdownMenuItem onSelect={() => void copyLink()}>
                 <Link2 className="mr-2 h-4 w-4" /> Copiar enlace a este tema
               </DropdownMenuItem>
+              {fitState.needed && (
+                <DropdownMenuItem onSelect={toggleFit}>
+                  {fitOn ? <Maximize2 className="mr-2 h-4 w-4" /> : <Minimize2 className="mr-2 h-4 w-4" />}
+                  {fitOn ? `Ver a tamaño real (ahora al ${Math.round(fitState.scale * 100)} %)` : 'Ajustar al ancho de la pantalla'}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem disabled={html === null} onSelect={() => html !== null && downloadDeck(html, deckTitle ?? item!.title)}>
                 <Download className="mr-2 h-4 w-4" /> Descargar esta presentación
               </DropdownMenuItem>

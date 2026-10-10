@@ -98,7 +98,7 @@ export function PresenterHud({
           type="button"
           className={iconButton}
           onClick={onToggleFullscreen}
-          title={isFullscreen ? 'Salir de pantalla completa (F)' : 'Pantalla completa (F)'}
+          title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
         >
           {isFullscreen ? <Minimize className="h-[18px] w-[18px]" /> : <Maximize className="h-[18px] w-[18px]" />}
         </button>
