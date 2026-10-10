@@ -56,10 +56,13 @@ const TRUSTED = process.env.NEXT_PUBLIC_TRUST_SLIDES !== 'false';
 const SANDBOX =
   'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-pointer-lock allow-downloads';
 
-/** Espera máxima, tras cargar, a que se decida el tamaño antes de mostrarla. */
-const SETTLE_MS = 700;
-/** Lo que se oculta mientras se recoloca con un tamaño nuevo. */
-const RESETTLE_MS = 450;
+/**
+ * Espera máxima, desde que el documento está listo, a que termine de cargar y
+ * se decida su tamaño antes de mostrarla. Si tarda más se muestra tal cual.
+ */
+const SETTLE_MS = 1200;
+/** Lo que se oculta, como mucho, mientras se recoloca con un tamaño nuevo y se vuelve a medir. */
+const RESETTLE_MS = 700;
 /** Cambio de sitio (pantalla completa, panel lateral) que merece ocultarla un instante. */
 const BIG_CHANGE = 0.2;
 

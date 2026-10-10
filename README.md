@@ -80,7 +80,7 @@ Con sesión de docente aparece **Docente → Modo edición**.
 En modo edición, cada presentación muestra los avisos de su revisión: texto fuera
 del documento (por ejemplo, el guion que lo generó), falta de `<title>`, recursos
 `http://`, errores de ejecución, fórmulas que dependen de la plataforma para
-convertirse y si se está mostrando reducida porque no cabe a lo ancho.
+convertirse y si se está mostrando reducida o ampliada.
 
 ## Cómo se muestran las presentaciones
 
@@ -99,13 +99,43 @@ Lo único que se le añade es un puente (`src/lib/slide-bridge.runtime.js`) que:
 - convierte con KaTeX las fórmulas que el archivo deja en crudo (delimitadores que
   su configuración no reconoce, texto añadido después de su único repaso, o KaTeX
   ausente). Una presentación que se convierte sola no se toca;
-- mide si el contenido se sale a lo ancho (una barra de botones en el teléfono) y,
-  en ese caso, la plataforma la dibuja con el ancho que necesita y la reduce hasta
-  caber, con un mínimo del 60 %. Quien prefiera el tamaño natural lo elige en
-  «Más opciones → Ver a tamaño real»;
+- mide cuánto sitio necesita la presentación, para ajustar su tamaño (ver abajo);
 - reenvía los errores de ejecución, que el docente ve en modo edición.
 
 Entrar o salir del modo presentación no recarga la presentación ni pierde la lámina.
+
+### Ajuste de tamaño
+
+Unas presentaciones llenan la ventana y otras fueron hechas para una pantalla más
+pequeña o más grande que la de quien las abre. La plataforma dibuja el `iframe`
+con el ancho que le conviene y lo escala para que ocupe su sitio; es lo mismo que
+el zoom del navegador, así que la presentación se acomoda sola y nada de su
+contenido se toca. Las reglas están en `src/lib/slide-fit.js`:
+
+- **Reducir.** Si el contenido se sale a lo ancho (una barra de botones en el
+  teléfono) se reduce hasta que quepa, con un mínimo del 60 %. En una ventana
+  amplia no se achica toda la presentación por unos botones secundarios de la
+  cabecera, salvo que falte poco o queden fuera los de avanzar.
+- **Ampliar.** Si sus láminas caben en la pantalla y dejan márgenes a los lados
+  (un escenario de 1280 × 720 en un proyector de 1920 × 1080, una columna
+  estrecha), se amplía hasta llenar el ancho, con un máximo del 150 %.
+- **Sin estropearla.** El tamaño es uno para toda la presentación: una lámina que
+  cabía tiene que seguir cabiendo, así que manda la más alta. No se cruza ningún
+  punto de corte (`@media`, `matchMedia`) para que no pase a su diseño de tableta.
+  Si la mayoría de las láminas ya llena la pantalla o necesita desplazarse, se deja
+  como está; lo mismo si la columna mide según la ventana (`vw`) y ampliar no la
+  acercaría a los bordes.
+
+El tamaño se decide al abrir, antes de mostrarla. Para conocer el alto de las
+láminas ocultas sin navegar, el puente pone cada una un instante en el lugar de la
+activa dentro de una sola tarea: el navegador no llega a pintarla y el documento
+queda exactamente como estaba. Si después una lámina resulta más alta de lo
+previsto (dibuja su contenido al activarse), la ampliación baja al llegar a ella;
+nunca sube mientras se recorre la presentación.
+
+Quien prefiera verla tal cual lo elige en «Más opciones → Ver a tamaño real»; la
+preferencia se recuerda en ese navegador. En modo edición se indica con qué
+porcentaje se está mostrando.
 
 Los fragmentos sueltos (`<h1>…</h1><p>…</p>`, sin `<html>`) reciben una plantilla
 de la plataforma con tipografía, tema claro u oscuro y KaTeX local.
@@ -118,6 +148,9 @@ de la plataforma con tipografía, tema claro u oscuro y KaTeX local.
 - Si se usan `\(…\)` o `$…$`, declarar esos delimitadores en la llamada a
   `renderMathInElement`; en una cadena de JavaScript se escriben `'\\('` y `'\\)'`.
 - No depender de `localStorage`: dentro del `iframe` aislado no está disponible.
+- Para que se vea bien en cualquier pantalla, dar a la columna o al escenario un
+  ancho máximo en píxeles y dejar que cada lámina quepa en una pantalla; así la
+  plataforma puede ampliarla en un proyector.
 
 ## Seguridad
 
@@ -137,7 +170,7 @@ src/components/admin/     Menú del docente, editor de HTML y mantenimiento
 src/hooks/                Estado del curso, sesión y ruta (#/t/<tema>/<n>)
 src/lib/data/             Lectura por REST, caché en IndexedDB y almacén del curso
 src/lib/admin/            Sesión de Google y publicación (carga diferida)
-src/lib/slide-*.ts|js     Documento que recibe el iframe y puente
+src/lib/slide-*.ts|js     Documento que recibe el iframe, puente y ajuste de tamaño
 src/lib/tree.ts           Operaciones sobre el temario
 e2e/                      Pruebas de extremo a extremo
 firestore.rules           Reglas de acceso
@@ -146,9 +179,9 @@ public/katex/             KaTeX servido por la plataforma
 
 ## Pruebas
 
-- `npm test`: pruebas unitarias (Vitest) de temario, formato de datos, publicación
-  y construcción del documento.
+- `npm test`: pruebas unitarias (Vitest) de temario, formato de datos, publicación,
+  construcción del documento y reglas de tamaño.
 - `npm run test:e2e`: Playwright contra `next start`, con Firestore y la sesión
   simulados en memoria; nunca tocan la base de datos real. Cubren la lectura, el
   modo presentación, la edición y publicación, la migración, el teléfono, las
-  fórmulas en crudo y el ajuste de ancho.
+  fórmulas en crudo y el ajuste de tamaño.

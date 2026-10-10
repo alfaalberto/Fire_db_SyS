@@ -271,7 +271,7 @@ const navRow = `<p><button id="btn-prev">Anterior</button> <button id="btn-next"
 const shortSlide = (title: string, active = false) =>
   `<section class="slide${active ? ' active' : ''}"><h1 data-testid="heading">${title}</h1>${paragraphs(2)}</section>`;
 const tallSlide = (title: string, height: number) =>
-  `<section class="slide"><h1 data-testid="heading">${title}</h1><p>Una figura alta.</p><div class="block" style="height:${height}px"></div><p>Pie de la lámina.</p></section>`;
+  `<section class="slide"><h1 data-testid="heading">${title}</h1><p>Una figura alta. <input id="campo" aria-label="Valor"></p><div class="block" style="height:${height}px"></div><p>Pie de la lámina.</p></section>`;
 
 /** Portada corta y láminas que ya llenan la pantalla: ampliar solo la portada sería un vaivén. */
 export const coverThenFull = page(

@@ -653,6 +653,8 @@ export function slideBridgeRuntime() {
     if (gained > 0) {
       mathRescued += gained;
       post({ t: 'math', count: mathRescued });
+      // Las láminas cambiaron de alto: lo previsto para ellas ya no vale.
+      deckCache = [];
       layoutSoon(120);
     }
     // Quedaron más de las que se revisan de una vez: se sigue enseguida.
@@ -924,9 +926,11 @@ export function slideBridgeRuntime() {
   }
 
   /**
-   * Ancho de la columna que ocupa el contenido a la vista (textos, imágenes,
+   * Ancho de la columna que ocupa el contenido de la página (textos, imágenes,
    * gráficas, controles; sin cabeceras ni pies) cuando está centrada y deja
-   * margen a ambos lados. 0 si llena la ventana o no está centrada.
+   * margen a ambos lados. 0 si llena la ventana o no está centrada. Cuenta
+   * también lo que queda más abajo: la columna es de la página, no de la
+   * parte a la que se ha desplazado el lector.
    */
   function contentColumn(all, count, memo, width, height, client) {
     var left = Infinity;
@@ -946,7 +950,7 @@ export function slideBridgeRuntime() {
       else if (!hasOwnText(el)) continue;
       var rect = el.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) continue;
-      if (rect.bottom <= 0 || rect.top >= height || rect.right <= 0 || rect.left >= width) continue;
+      if (rect.right <= 0 || rect.left >= width) continue;
       var span = visibleSpan(el, memo, width, height);
       if (!span || span.bar) continue;
       // Casi todo recortado: es la lámina vecina asomando, no contenido a la vista.
@@ -1060,8 +1064,12 @@ export function slideBridgeRuntime() {
     // presentación ya no se ampliará: no hace falta medir el resto.
     var allowed = natural ? Math.floor(nodes.length * (1 - deckMostly)) : nodes.length;
     var misses = liveTall > height + 6 ? 1 : 0;
-    var scrollLeft = window.pageXOffset;
-    var scrollTop = window.pageYOffset;
+    // Al cambiar de lámina la página se acorta y el navegador recoloca el
+    // desplazamiento: se anota para devolverlo.
+    var scrolled = [];
+    for (var up = active.parentElement; up; up = up.parentElement) {
+      if (up.scrollTop > 0 || up.scrollLeft > 0) scrolled.push([up, up.scrollTop, up.scrollLeft]);
+    }
     var activeStyle = active.getAttribute('style');
     try {
       // La activa sale del flujo, con su tamaño, para dejar su sitio. Arriba y
@@ -1091,7 +1099,11 @@ export function slideBridgeRuntime() {
       }
     } finally {
       restoreAttribute(active, 'style', activeStyle);
-      if (window.pageXOffset !== scrollLeft || window.pageYOffset !== scrollTop) window.scrollTo(scrollLeft, scrollTop);
+      for (i = 0; i < scrolled.length; i++) {
+        var item = scrolled[i];
+        if (item[0].scrollTop !== item[1]) item[0].scrollTop = item[1];
+        if (item[0].scrollLeft !== item[2]) item[0].scrollLeft = item[2];
+      }
       // Lo que se movió aquí no es texto nuevo de la presentación.
       if (mathObserver) mathObserver.takeRecords();
     }
@@ -1201,7 +1213,7 @@ export function slideBridgeRuntime() {
     var done = function () {
       clearTimeout(timer);
       // Llegaron tarde: lo que se midió con las de reserva se descarta.
-      if (late) { lastLayout = ''; post({ t: 'relayout' }); }
+      if (late) { lastLayout = ''; deckCache = []; post({ t: 'relayout' }); }
       layoutSoon(80);
     };
     fonts.ready.then(done, done);

@@ -360,6 +360,31 @@ test.describe('el tamaño se decide para la presentación entera', () => {
     await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.3[34]/);
   });
 
+  test('prever las demás láminas no mueve la página, no quita el foco ni deja rastro', async ({ page }) => {
+    await openApp(page, lab(), '#/t/lab-conjunto/2');
+    await expectHeading(page, 'Primera');
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.3[34]/);
+    await deck(page).getByRole('button', { name: 'Siguiente' }).click();
+    await expectHeading(page, 'La larga');
+    await deck(page).locator('#campo').focus();
+    await deck(page).locator('body').evaluate(() => window.scrollTo(0, 300));
+
+    // Con otro sitio disponible el tamaño se decide de nuevo, y con él se
+    // vuelven a prever las demás láminas, ahora desde una lámina desplazada.
+    await page.setViewportSize({ width: 1330, height: 800 });
+    await expect(frame(page)).toHaveCSS('transform', /^matrix\(1\.[23]/);
+    await page.waitForTimeout(900);
+    const state = await deck(page)
+      .locator('body')
+      .evaluate(() => ({
+        scrolled: window.scrollY > 150,
+        focus: document.activeElement ? document.activeElement.id : '',
+        classes: [].slice.call(document.querySelectorAll('.slide')).map((el: Element) => el.className),
+        styled: document.querySelectorAll('.slide[style]').length,
+      }));
+    expect(state).toEqual({ scrolled: true, focus: 'campo', classes: ['slide', 'slide active', 'slide', 'slide'], styled: 0 });
+  });
+
   test('si una lámina resulta más alta de lo previsto, la ampliación baja al llegar y ya no sube', async ({ page }) => {
     await openApp(page, lab(), '#/t/lab-conjunto/3');
     await expectHeading(page, 'Corta');
