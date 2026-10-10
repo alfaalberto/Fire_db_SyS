@@ -39,9 +39,11 @@ a `.env.local` y cambia los valores.
    «Publicar», o ejecuta `firebase deploy --only firestore:rules`.
 
 Con las reglas publicadas cualquiera puede leer el curso y solo las cuentas de
-`admins` (con correo verificado) pueden modificarlo. Las reglas se escribieron para
-este esquema, pero conviene probarlas con el simulador de reglas de la consola
-antes de confiarles el contenido.
+`admins` (con correo verificado) pueden modificarlo. Publícalas cuando esta versión
+ya esté desplegada: a partir de ese momento la versión anterior, que escribía sin
+identificarse, ya no puede guardar. Las reglas se escribieron para este esquema,
+pero conviene probarlas con el simulador de reglas de la consola antes de
+confiarles el contenido.
 
 La clave de API de Firebase es pública por diseño. Aun así, en Google Cloud →
 *Credenciales* conviene restringirla a los dominios de la plataforma.
@@ -55,9 +57,10 @@ que cada visitante descargaba completo. La actual separa el temario
 1. En la versión anterior, pulsa «Guardar» y **exporta un respaldo**.
 2. Despliega esta versión. Sigue leyendo el formato anterior, así que el curso se
    ve igual desde el primer momento.
-3. Entra con la cuenta de docente → menú **Docente → Mantenimiento → «Migrar al
+3. Configura el acceso del docente y publica las reglas (sección anterior).
+4. Entra con la cuenta de docente → menú **Docente → Mantenimiento → «Migrar al
    formato nuevo»**. No borra nada: copia cada tema a su documento y crea el temario.
-4. En el mismo cuadro, «Analizar» muestra cuánto ocupa el formato anterior y permite
+5. En el mismo cuadro, «Analizar» muestra cuánto ocupa el formato anterior y permite
    borrar primero las copias sobrantes y, ya migrado y con respaldo, todo lo demás.
 
 ## Editar el curso
@@ -98,7 +101,8 @@ Lo único que se le añade es un puente (`src/lib/slide-bridge.runtime.js`) que:
   ausente). Una presentación que se convierte sola no se toca;
 - mide si el contenido se sale a lo ancho (una barra de botones en el teléfono) y,
   en ese caso, la plataforma la dibuja con el ancho que necesita y la reduce hasta
-  caber, con un mínimo del 60 %;
+  caber, con un mínimo del 60 %. Quien prefiera el tamaño natural lo elige en
+  «Más opciones → Ver a tamaño real»;
 - reenvía los errores de ejecución, que el docente ve en modo edición.
 
 Entrar o salir del modo presentación no recarga la presentación ni pierde la lámina.

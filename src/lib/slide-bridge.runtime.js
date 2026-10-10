@@ -452,7 +452,9 @@ export function slideBridgeRuntime() {
 
     if (strategy !== 'none') deliver(strategy, dir, ev);
     reportSoon(160);
+    // Las transiciones largas terminan después: se vuelve a mirar.
     setTimeout(function () { report(false); }, 520);
+    setTimeout(function () { report(false); }, 1100);
     layoutSoon(560);
   }
 
@@ -618,12 +620,14 @@ export function slideBridgeRuntime() {
 
     var before = document.querySelectorAll('.katex').length;
     var options = mathOptions();
+    var tried = 0;
     mathBusy = true;
     for (var j = 0; j < parents.length; j++) {
       // Mismo texto que la vez anterior: KaTeX no pudo con él. No se insiste,
       // o la presentación quedaría repasándose sin fin.
       if (parents[j].__sysMath === texts[j]) continue;
       parents[j].__sysMath = texts[j];
+      tried += 1;
       try { render(parents[j], options); } catch (e) {}
     }
     mathBusy = false;
@@ -635,7 +639,8 @@ export function slideBridgeRuntime() {
       post({ t: 'math', count: mathRescued });
       layoutSoon(120);
     }
-    if (nodes.length >= 400) scheduleMath(40);
+    // Quedaron más de las que se revisan de una vez: se sigue enseguida.
+    if (nodes.length >= 400 && tried > 0) scheduleMath(40);
   }
 
   // Si ya hay un repaso pendiente se conserva el más próximo.
