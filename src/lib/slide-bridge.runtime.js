@@ -378,11 +378,15 @@ export function slideBridgeRuntime() {
    * de control: lo que cambia en ambas es animación; lo que cambia solo en la
    * primera es la respuesta a la tecla.
    */
+  // Observador en curso: lo que el propio puente mueve al medir no cuenta.
+  var navObserver = null;
+
   function watch(root, act, done) {
     if (!root || typeof MutationObserver !== 'function') { act(); setTimeout(function () { done(false); }, 140); return; }
     var first = [];
     var second = [];
     var bucket = first;
+    var stop = function () { observer.disconnect(); if (navObserver === observer) navObserver = null; };
     var observer = new MutationObserver(function (records) {
       for (var i = 0; i < records.length; i++) {
         var target = records[i].target;
@@ -391,14 +395,15 @@ export function slideBridgeRuntime() {
       }
     });
     observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-hidden'] });
+    navObserver = observer;
     // Primero se observa y después se actúa: una tecla sintética o un clic
     // cambian la página en el acto.
     act();
     setTimeout(function () {
-      if (first.length === 0) { observer.disconnect(); done(false); return; }
+      if (first.length === 0) { stop(); done(false); return; }
       bucket = second;
       setTimeout(function () {
-        observer.disconnect();
+        stop();
         var changed = false;
         for (var i = 0; i < first.length; i++) {
           if (second.indexOf(first[i]) === -1) { changed = true; break; }
@@ -964,6 +969,7 @@ export function slideBridgeRuntime() {
       void document.body.offsetHeight;
       for (i = 0; i < list.length; i++) restoreStyle(list[i], saved[i], false);
     }
+    if (navObserver) navObserver.takeRecords();
   }
 
   /**
@@ -1080,6 +1086,7 @@ export function slideBridgeRuntime() {
       restoreStyle(tallest, savedTallest, false);
       if (!stacked) restoreStyle(active, savedActive, false);
     }
+    if (navObserver) navObserver.takeRecords();
     if (result && result.side < 0) result = null;
     tallestMemo = { el: tallest, vh: vh, vw: window.innerWidth, result: result };
     return result;
