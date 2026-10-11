@@ -237,6 +237,7 @@
     frame.setAttribute('allow', 'fullscreen; clipboard-write; autoplay');
     frame.style.cssText = 'position:absolute;left:0;top:0;border:0;transform-origin:0 0;';
     var box = { width: W, height: Hh };
+    var shrink = opts.shrink || H.shrink || 0.3;
     var state = fit.createFit(box, opts.enabled !== false, opts.model || null);
     var log = [];
     var pending = new Map();
@@ -250,7 +251,7 @@
       var v = state.view;
       frame.style.width = v.width + 'px';
       frame.style.height = v.height + 'px';
-      frame.style.transform = 'scale(' + (0.3 * v.scale) + ')';
+      frame.style.transform = 'scale(' + (shrink * v.scale) + ')';
       frame.getBoundingClientRect();
     }
     function send(msg) { msg.__sys = token; frame.contentWindow.postMessage(msg, '*'); }
@@ -409,7 +410,7 @@
    */
   H.present = async function (deck, normal, full, opts) {
     opts = opts || {};
-    var h = H.openDeck(deck, normal[0], normal[1], { model: opts.model || null });
+    var h = H.openDeck(deck, normal[0], normal[1], { model: opts.model || null, screen: opts.screen, shrink: opts.shrink });
     await h.settle(9000);
     await H.sleep(300); h.remeasure(); await H.sleep(120); await h.settle(5000);
     var zNormal = +h.state.view.scale.toFixed(3);
@@ -441,7 +442,7 @@
     async function work() {
       while (next < list.length) {
         var deck = list[next++];
-        try { job.results[deck.label] = await H.present(deck, normal, full, { model: opts.models ? opts.models[deck.label] || null : null }); }
+        try { job.results[deck.label] = await H.present(deck, normal, full, { model: opts.models ? opts.models[deck.label] || null : null, screen: opts.screen, shrink: opts.shrink, limit: opts.limit }); }
         catch (e) { job.errors.push(deck.label + ': ' + (e && e.stack || e)); }
         job.done++;
       }
