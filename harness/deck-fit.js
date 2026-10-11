@@ -53,7 +53,7 @@ var DeckFit = (() => {
   var INNER_FREE = 0.08;
   var MAX_TRIES = 3;
   var MAX_CHANGES = 12;
-  var EMPTY_MODEL = { col: null, wide: null, tall: null, fluid: null, inner: false, slack: 0 };
+  var EMPTY_MODEL = { col: null, wide: null, tall: null, ahead: null, fluid: null, inner: false, slack: 0 };
   function natural(box) {
     return { width: box.width, height: box.height, scale: 1 };
   }
@@ -67,19 +67,20 @@ var DeckFit = (() => {
     return model.fluid !== null && Math.abs(ratio - model.fluid) <= model.fluid * 0.25 + 0.01;
   }
   function isEmpty(model) {
-    return model.col === null && model.wide === null && model.tall === null && model.fluid === null && !model.inner && !(model.slack > 0);
+    return model.col === null && model.wide === null && model.tall === null && model.ahead === null && model.fluid === null && !model.inner && !(model.slack > 0);
   }
   function canZoom(box) {
     return box.width >= DESIGN_WIDTH * (1 + MIN_GAIN) && box.height > 0;
   }
   function targetView(model, box) {
-    var _a;
+    var _a, _b;
     const W = box.width;
     const H = box.height;
     if (!(W > 0) || !(H > 0)) return natural(box);
     let width = W;
     if (model.col !== null && canZoom(box)) {
-      width = Math.min(W, Math.max(model.col, DESIGN_WIDTH, W / MAX_SCALE, ((_a = model.tall) != null ? _a : 0) * W / H));
+      const tall = Math.max((_a = model.tall) != null ? _a : 0, (_b = model.ahead) != null ? _b : 0);
+      width = Math.min(W, Math.max(model.col, DESIGN_WIDTH, W / MAX_SCALE, tall * W / H));
     }
     if (model.wide !== null && model.wide > width) width = Math.min(model.wide, W / MIN_SCALE);
     if (width <= W && width > W / (1 + MIN_GAIN)) width = W;
@@ -114,7 +115,7 @@ var DeckFit = (() => {
     return createFit(state.box, state.enabled, null);
   }
   function reportFit(state, report) {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f;
     const { box } = state;
     const need = Number(report.need);
     const width = Number(report.width);
@@ -159,13 +160,17 @@ var DeckFit = (() => {
     const outer = scrolls.includes(slide) ? 0 : pushed ? Math.max(content, whole - model.slack) : content;
     const inner = model.inner ? 0 : Math.max((_d = report.vin) != null ? _d : 0, (_e = report.vcut) != null ? _e : 0);
     let spill = Math.max(outer, inner);
+    const more = typeof report.vmore === "number" && report.vmore > 0 ? report.vmore : 0;
     if (!zoomed) {
       if (inner > 2 && ((_f = report.vfree) != null ? _f : 0) >= box.height * INNER_FREE) {
         model.inner = true;
         if (chase) model.tall = chase.base;
         spill = outer;
       }
-      if (spill > 2) model.tall = grow(model.tall, Math.ceil(height + spill));
+      if (spill > 2) {
+        model.tall = grow(model.tall, Math.ceil(height + spill));
+        model.ahead = Math.ceil(height + spill + more);
+      }
       chase = null;
     } else if (spill <= 2) {
       chase = null;
@@ -181,13 +186,15 @@ var DeckFit = (() => {
       if (!same || height > chase.height + 1) chase = { slide, spill, height, base: same ? chase.base : state.model.tall };
       model.tall = grow(model.tall, Math.ceil(Math.min(height + spill, box.height)));
     }
+    if (!zoomed && spill <= 2 && side !== null && typeof report.vfree === "number") {
+      const own = Math.max(0, Math.floor(height - report.vfree));
+      model.tall = grow(model.tall, own);
+      model.ahead = own + Math.ceil(more);
+    }
     const kept = model.col;
     if (side !== null && side >= Math.max(MIN_MARGIN, width * MIN_MARGIN_RATIO) && !isFluid(model, side / width)) {
       const edge = typeof report.edge === "number" && report.edge > 0 ? report.edge : 0;
       model.col = grow(model.col, Math.ceil(width - 2 * side + 2 * Math.max(GUTTER, edge + EDGE_GAP)));
-      if (!zoomed && spill <= 2 && typeof report.vfree === "number") {
-        model.tall = grow(model.tall, Math.max(0, Math.floor(height - report.vfree + Math.max(0, (_g = report.vmore) != null ? _g : 0))));
-      }
     }
     let next = settle({ ...state, model, over, widened, trial, tries, scrolls, chase });
     if (kept === null && model.col !== null && side !== null && next.view.width < state.view.width && !sameView(next.view, state.view)) {
@@ -228,7 +235,7 @@ var DeckFit = (() => {
     if (!Array.isArray(entry)) return null;
     const day = unpack(entry[5]);
     if (day === null || Math.floor(now / DAY) - day > MEMORY_DAYS) return null;
-    const model = { col: unpack(entry[0]), wide: unpack(entry[1]), tall: unpack(entry[2]), fluid: unpack(entry[3]), inner: entry[4] === 1, slack: (_a = unpack(entry[6])) != null ? _a : 0 };
+    const model = { col: unpack(entry[0]), wide: unpack(entry[1]), tall: unpack(entry[2]), ahead: unpack(entry[7]), fluid: unpack(entry[3]), inner: entry[4] === 1, slack: (_a = unpack(entry[6])) != null ? _a : 0 };
     return isEmpty(model) ? null : model;
   }
   function rememberModel(key, model, now = Date.now()) {
@@ -238,7 +245,7 @@ var DeckFit = (() => {
       const since = Array.isArray(memory[key]) ? unpack(memory[key][5]) : null;
       delete memory[key];
       if (!isEmpty(model)) {
-        memory[key] = [pack(model.col), pack(model.wide), pack(model.tall), pack(model.fluid), model.inner ? 1 : 0, since != null ? since : Math.floor(now / DAY), pack(model.slack)];
+        memory[key] = [pack(model.col), pack(model.wide), pack(model.tall), pack(model.fluid), model.inner ? 1 : 0, since != null ? since : Math.floor(now / DAY), pack(model.slack), pack(model.ahead)];
       }
       const keys = Object.keys(memory);
       for (let i = 0; i < keys.length - MEMORY_LIMIT; i++) delete memory[keys[i]];
@@ -250,7 +257,7 @@ var DeckFit = (() => {
     rememberModel(key, EMPTY_MODEL);
   }
   function sameModel(a, b) {
-    return a.col === b.col && a.wide === b.wide && a.tall === b.tall && a.fluid === b.fluid && a.inner === b.inner && a.slack === b.slack;
+    return a.col === b.col && a.wide === b.wide && a.tall === b.tall && a.ahead === b.ahead && a.fluid === b.fluid && a.inner === b.inner && a.slack === b.slack;
   }
   return __toCommonJS(deck_fit_exports);
 })();

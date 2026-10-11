@@ -806,9 +806,13 @@ export function slideBridgeRuntime() {
   // conservaron al cambiar el alto de la ventana: no dependen de ella.
   var boxHeights = typeof WeakMap === 'function' ? new WeakMap() : null;
   var rigidBoxes = typeof WeakSet === 'function' ? new WeakSet() : null;
-  // Alto de las láminas que no están a la vista, medido con cierto ancho.
+  // Cajas cuyo alto sale de una proporción (true) o no (false).
+  var ratioBoxes = typeof WeakMap === 'function' ? new WeakMap() : null;
+  // Alto natural de las láminas que no están a la vista, medido con cierto ancho.
   var slideHeights = typeof WeakMap === 'function' ? new WeakMap() : null;
   var slideHeightsAt = 0;
+  // Franjas ocupadas en la última medida, y a partir de qué alto una vacía cuenta.
+  var lastRows = null;
 
   function noteHeight(el, vh) {
     if (!boxHeights || !rigidBoxes) return;
@@ -821,44 +825,106 @@ export function slideBridgeRuntime() {
     boxHeights.set(el, [vh, height]);
   }
 
-  /** `el` está dentro de una caja cuyo alto no depende de la ventana. */
+  /**
+   * El alto de `el` lo fija su ancho: tiene una proporción (una lámina 16:9) y
+   * recorta o desplaza lo que no le cabe, en lugar de crecer con ello.
+   */
+  function ratioBound(el) {
+    if (!ratioBoxes) return false;
+    var known = ratioBoxes.get(el);
+    if (known === undefined) {
+      var cs = getComputedStyle(el);
+      var ratio = cs.aspectRatio;
+      known = !!ratio && ratio !== 'auto' && cs.overflowY !== 'visible';
+      ratioBoxes.set(el, known);
+    }
+    return known;
+  }
+
+  /**
+   * `el` está dentro de una caja cuyo alto no depende de la ventana: lo
+   * conservó al cambiar el alto de esta, o se lo da una proporción.
+   */
   function inRigidBox(el) {
     if (!rigidBoxes) return false;
-    for (var node = el; node && node !== document.documentElement; node = node.parentElement) {
-      if (rigidBoxes.has(node)) return true;
+    for (var node = el; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      if (rigidBoxes.has(node) || ratioBound(node)) return true;
     }
     return false;
   }
 
-  /** Alto que ocupa lo que lleva dentro una lámina: su texto, imágenes y controles. */
-  function contentHeight(slide) {
-    var top = Infinity;
-    var bottom = -Infinity;
-    var all = slide.getElementsByTagName('*');
-    for (var i = 0; i < all.length && i < 1500; i++) {
-      var el = all[i];
-      var holds = SPARE_LEAF.test(el.tagName);
-      for (var node = el.firstChild; node && !holds; node = node.nextSibling) {
-        if (node.nodeType === 3 && /\S/.test(node.nodeValue || '')) holds = true;
-      }
-      if (!holds) continue;
-      var box = el.getBoundingClientRect();
-      if (box.height < 1 || box.width < 1) continue;
-      if (box.top < top) top = box.top;
-      if (box.bottom > bottom) bottom = box.bottom;
+  /** Altura libre: la de las franjas vacías grandes, respetando un poco de cada una. */
+  function freeHeight(used, count, band) {
+    var run = 0;
+    var free = 0;
+    for (var y = 0; y <= count; y++) {
+      if (y < count && !used[y]) run += SPARE_ROW;
+      else { if (run >= band) free += run - 24; run = 0; }
     }
-    return bottom > top ? bottom - top : 0;
+    return free;
+  }
+
+  function restoreStyle(el, style, hold) {
+    if (style === null) el.removeAttribute('style');
+    else el.setAttribute('style', style);
+    if (hold) el.style.setProperty('transition', 'none', 'important');
   }
 
   /**
-   * Cuánto más alta que la lámina a la vista es la más alta de las demás.
-   * Las ocultas con `display:none` no tienen medidas: se les da un instante,
-   * sin llegar a pintarse, el `display` de la visible. Así el tamaño se elige
-   * de una vez para toda la presentación y no hay que corregirlo al llegar a
-   * una lámina más larga.
+   * Alto natural de unas láminas que no están a la vista: el que tendrían con
+   * solo su contenido, sin el mínimo ni el alto fijo que las estire. Se mide
+   * de una vez y sin que llegue a pintarse nada.
+   */
+  function measureSlides(list, display, stacked, column) {
+    var saved = [];
+    var gone = [];
+    var laid = false;
+    var i;
+    for (i = 0; i < list.length; i++) {
+      saved.push(list[i].getAttribute('style'));
+      gone.push(getComputedStyle(list[i]).display === 'none');
+    }
+    for (i = 0; i < list.length; i++) {
+      var st = list[i].style;
+      if (gone[i]) {
+        st.setProperty('display', display, 'important');
+        st.setProperty('visibility', 'hidden', 'important');
+      } else {
+        // Ya ocupa su sitio (transparente, invisible): que el cambio no
+        // arranque una transición.
+        laid = true;
+        st.setProperty('transition', 'none', 'important');
+      }
+      st.setProperty('min-height', '0', 'important');
+      st.setProperty('height', 'auto', 'important');
+      st.setProperty('max-height', 'none', 'important');
+      if (stacked) st.setProperty('bottom', 'auto', 'important');
+      if (column) st.setProperty('flex', 'none', 'important');
+    }
+    for (i = 0; i < list.length; i++) {
+      var el = list[i];
+      // Con rellenos y bordes, y con lo que sobresalga de ella.
+      var edges = el.offsetHeight - el.clientHeight;
+      slideHeights.set(el, Math.max(el.offsetHeight, el.scrollHeight + (edges > 0 ? edges : 0)));
+    }
+    for (i = 0; i < list.length; i++) restoreStyle(list[i], saved[i], laid);
+    if (laid) {
+      // Con los valores de antes ya aplicados (y aún sin transiciones), se
+      // quita el freno.
+      void document.body.offsetHeight;
+      for (i = 0; i < list.length; i++) restoreStyle(list[i], saved[i], false);
+    }
+  }
+
+  /**
+   * Cuánto alto más pide la lámina más alta de las que no están a la vista,
+   * contado como se cuenta el alto libre: lo que crecería la lámina a la
+   * vista y, de lo que hoy queda vacío dentro de ella, lo que la otra
+   * ocuparía. Así el tamaño se elige de una vez para toda la presentación y
+   * no hay que corregirlo al llegar a una lámina más larga.
    */
   function tallerSlides(vh) {
-    if (!slideHeights) return 0;
+    if (!slideHeights || !lastRows) return 0;
     var g = findGroup();
     var shown = detectFromGroup();
     if (!g || !shown || !shown.el || g.nodes.length > 80) return 0;
@@ -867,7 +933,6 @@ export function slideBridgeRuntime() {
     if (!parent) return 0;
     var activeStyle = getComputedStyle(active);
     if (activeStyle.display === 'none') return 0;
-    var activeBox = active.getBoundingClientRect();
     var stacked = activeStyle.position === 'absolute' || activeStyle.position === 'fixed';
     var column = false;
     if (!stacked) {
@@ -881,6 +946,7 @@ export function slideBridgeRuntime() {
     // el que se apilan. Si su alto es fijo, o no llega al pie de la ventana,
     // lo que no quepa en él se desplaza o se recorta por diseño con cualquier
     // ventana: no es la ventana lo que limita a las láminas.
+    if (ratioBound(active)) return 0;
     var host = stacked ? active.offsetParent : null;
     for (var up = parent; up && up !== document.body && up !== document.documentElement; up = up.parentElement) {
       if (getComputedStyle(up).overflowY !== 'visible') { host = up; break; }
@@ -890,35 +956,45 @@ export function slideBridgeRuntime() {
     }
     var width = window.innerWidth;
     if (width !== slideHeightsAt) { slideHeights = new WeakMap(); slideHeightsAt = width; }
-    var base = contentHeight(active);
-    if (!base) return 0;
-    var extra = 0;
-    for (var i = 0; i < g.nodes.length; i++) {
-      var el = g.nodes[i];
-      if (el === active || el.parentElement !== parent) continue;
-      // [alto de su contenido, alto de su caja]
-      var size = slideHeights.get(el);
-      if (!size) {
-        if (getComputedStyle(el).display === 'none') {
-          var style = el.getAttribute('style');
-          el.style.setProperty('display', activeStyle.display, 'important');
-          el.style.setProperty('visibility', 'hidden', 'important');
-          if (column) el.style.setProperty('flex', 'none', 'important');
-          size = [contentHeight(el), el.getBoundingClientRect().height];
-          if (style === null) el.removeAttribute('style');
-          else el.setAttribute('style', style);
-        } else {
-          // Oculta de otro modo (transparente, invisible): ya tiene medidas.
-          size = [contentHeight(el), el.getBoundingClientRect().height];
-        }
-        slideHeights.set(el, size);
-      }
-      var delta = size[0] - base;
-      // En el flujo la caja mide lo que su contenido, con rellenos y todo.
-      if (!stacked && size[1] - activeBox.height > delta) delta = size[1] - activeBox.height;
-      if (delta > extra) extra = delta;
+    var pending = [];
+    var i;
+    var el;
+    for (i = 0; i < g.nodes.length; i++) {
+      el = g.nodes[i];
+      if (el !== active && el.parentElement === parent && !slideHeights.has(el)) pending.push(el);
     }
-    return extra;
+    if (pending.length) measureSlides(pending, activeStyle.display, stacked, column);
+    var tallest = 0;
+    for (i = 0; i < g.nodes.length; i++) {
+      el = g.nodes[i];
+      if (el === active || el.parentElement !== parent) continue;
+      var need = slideHeights.get(el) || 0;
+      if (need > tallest) tallest = need;
+    }
+    if (!tallest) return 0;
+
+    var box = active.getBoundingClientRect();
+    var frame = active.offsetHeight || box.height;
+    // Lo que ocupa la lámina a la vista, con lo que sobresalga de su caja (si
+    // se desplaza por dentro o desborda, eso ya se cuenta aparte).
+    var edges = active.offsetHeight - active.clientHeight;
+    var own = Math.max(frame, active.scrollHeight + (edges > 0 ? edges : 0));
+    // De lo que queda vacío dentro de la lámina a la vista, lo que ocuparía
+    // la más alta puesta en su lugar.
+    var gain = 0;
+    var top = Math.max(0, box.top);
+    var bottom = Math.min(box.top + Math.min(tallest, frame), vh);
+    if (bottom - top >= SPARE_ROW) {
+      var filled = lastRows.used.slice();
+      var from = Math.floor(top / SPARE_ROW);
+      var to = Math.min(lastRows.count - 1, Math.floor((bottom - 0.5) / SPARE_ROW));
+      var changed = false;
+      for (var y = from; y <= to; y++) {
+        if (!filled[y]) { filled[y] = 1; changed = true; }
+      }
+      if (changed) gain = freeHeight(lastRows.used, lastRows.count, lastRows.band) - freeHeight(filled, lastRows.count, lastRows.band);
+    }
+    return gain + Math.max(0, tallest - own);
   }
 
   function alphaOf(color) {
@@ -962,6 +1038,7 @@ export function slideBridgeRuntime() {
    *   vcut   lo que la ventana o el contenedor principal recortan por abajo.
    */
   function spareScan() {
+    lastRows = null;
     var vw = window.innerWidth;
     var vh = window.innerHeight;
     var root = document.documentElement;
@@ -1218,13 +1295,8 @@ export function slideBridgeRuntime() {
     // Franjas vacías grandes: altura que la presentación no usa. Las pequeñas
     // son la separación entre sus bloques, y de las grandes se respeta un poco.
     var bandMin = Math.max(48, vh * 0.05);
-    var run = 0;
-    var free = 0;
-    for (y = 0; y <= rowsN; y++) {
-      if (y < rowsN && !used[y]) run += SPARE_ROW;
-      else { if (run >= bandMin) free += run - 24; run = 0; }
-    }
-    out.vfree = Math.floor(free);
+    out.vfree = Math.floor(freeHeight(used, rowsN, bandMin));
+    lastRows = { used: used, count: rowsN, band: bandMin };
     return out;
   }
 
