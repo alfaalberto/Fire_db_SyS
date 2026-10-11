@@ -378,11 +378,15 @@ export function slideBridgeRuntime() {
    * de control: lo que cambia en ambas es animación; lo que cambia solo en la
    * primera es la respuesta a la tecla.
    */
+  // Observador en curso: lo que el propio puente mueve al medir no cuenta.
+  var navObserver = null;
+
   function watch(root, act, done) {
     if (!root || typeof MutationObserver !== 'function') { act(); setTimeout(function () { done(false); }, 140); return; }
     var first = [];
     var second = [];
     var bucket = first;
+    var stop = function () { observer.disconnect(); if (navObserver === observer) navObserver = null; };
     var observer = new MutationObserver(function (records) {
       for (var i = 0; i < records.length; i++) {
         var target = records[i].target;
@@ -391,14 +395,15 @@ export function slideBridgeRuntime() {
       }
     });
     observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-hidden'] });
+    navObserver = observer;
     // Primero se observa y después se actúa: una tecla sintética o un clic
     // cambian la página en el acto.
     act();
     setTimeout(function () {
-      if (first.length === 0) { observer.disconnect(); done(false); return; }
+      if (first.length === 0) { stop(); done(false); return; }
       bucket = second;
       setTimeout(function () {
-        observer.disconnect();
+        stop();
         var changed = false;
         for (var i = 0; i < first.length; i++) {
           if (second.indexOf(first[i]) === -1) { changed = true; break; }
@@ -964,6 +969,7 @@ export function slideBridgeRuntime() {
       void document.body.offsetHeight;
       for (i = 0; i < list.length; i++) restoreStyle(list[i], saved[i], false);
     }
+    if (navObserver) navObserver.takeRecords();
   }
 
   /**
@@ -1080,6 +1086,7 @@ export function slideBridgeRuntime() {
       restoreStyle(tallest, savedTallest, false);
       if (!stacked) restoreStyle(active, savedActive, false);
     }
+    if (navObserver) navObserver.takeRecords();
     if (result && result.side < 0) result = null;
     tallestMemo = { el: tallest, vh: vh, vw: window.innerWidth, result: result };
     return result;
@@ -1457,8 +1464,9 @@ export function slideBridgeRuntime() {
       msg.firm = spare.firm;
       text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vdoc + '/' + spare.vin + '/' + spare.vown + '/' + spare.vcut + '/' + (spare.firm ? 1 : 0);
       // Y lo mismo para la lámina más alta de las que no están a la vista, si
-      // puede servir de algo: con poco margen a los lados no hay qué ampliar
-      // (mismo criterio que en `deck-fit`).
+      // puede servir de algo: no cuando la visible ya ocupa tanto que no
+      // cabría ampliada en ningún marco, ni cuando deja tan poco margen a los
+      // lados que no hay qué ampliar (mismo criterio que en `deck-fit`).
       var own = spare.vover > 2 ? height + spare.vover : height - spare.vfree;
       var worth = !(aheadLimit > 0) || own < aheadLimit;
       if (worth && (wantAhead === 2 || (wantAhead === 1 && spare.side >= Math.max(24, width * 0.05)))) {
