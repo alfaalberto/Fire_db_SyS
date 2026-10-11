@@ -79,7 +79,7 @@ var DeckFit = (() => {
     if (!(W > 0) || !(H > 0)) return natural(box);
     let width = W;
     if (model.col !== null && canZoom(box)) {
-      width = Math.max(model.col, DESIGN_WIDTH, W / MAX_SCALE, ((_a = model.tall) != null ? _a : 0) * W / H);
+      width = Math.min(W, Math.max(model.col, DESIGN_WIDTH, W / MAX_SCALE, ((_a = model.tall) != null ? _a : 0) * W / H));
     }
     if (model.wide !== null && model.wide > width) width = Math.min(model.wide, W / MIN_SCALE);
     if (width <= W && width > W / (1 + MIN_GAIN)) width = W;
