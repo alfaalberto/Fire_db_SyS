@@ -133,8 +133,9 @@ var DeckFit = (() => {
       const before = trial.col / trial.width;
       const now = side === null ? 0 : (width - 2 * side) / width;
       if (now < before * (1 + Math.max(TRIAL_GAIN, TRIAL_SHARE * (expected - 1)))) {
-        model.fluid = (trial.width - trial.col) / 2 / trial.width;
-        model.col = trial.previous;
+        const fluid = (trial.width - trial.col) / 2 / trial.width;
+        const back = settle({ ...state, model: { ...model, col: null, fluid }, trial: null, chase: null });
+        return { ...back, settled: false, changes: state.changes + 1 };
       }
       trial = null;
     }
@@ -187,14 +188,11 @@ var DeckFit = (() => {
       }
     }
     let next = settle({ ...state, model, over, widened, trial, tries, scrolls, chase });
-    if (!sameView(next.view, state.view) && next.view.width < state.view.width) {
-      const step = state.view.width / next.view.width;
-      if (side === null || tries >= MAX_TRIES || step < 1 + MIN_GAIN || state.changes >= MAX_CHANGES) {
-        next = settle({ ...next, model: { ...model, col: kept } });
+    if (kept === null && model.col !== null && side !== null && next.view.width < state.view.width && !sameView(next.view, state.view)) {
+      if (tries < MAX_TRIES && state.changes < MAX_CHANGES) {
+        return { ...next, trial: { width, col: width - 2 * side }, tries: tries + 1, settled: false, changes: state.changes + 1 };
       }
-      if (!sameView(next.view, state.view) && next.view.width < state.view.width && side !== null) {
-        return { ...next, trial: { width, col: width - 2 * side, previous: kept }, tries: tries + 1, settled: false, changes: state.changes + 1 };
-      }
+      next = settle({ ...next, model: { ...model, col: null } });
     }
     if (sameView(next.view, state.view) || state.changes >= MAX_CHANGES) {
       return { ...next, view: state.view, settled: true };
