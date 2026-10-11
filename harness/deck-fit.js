@@ -117,7 +117,7 @@ var DeckFit = (() => {
     if (inner > 2 && free >= box.height * INNER_FREE) inner = 0;
     const spill = Math.max(outer, inner);
     if (spill > 2) return Math.ceil(height + spill);
-    return free > 0 ? Math.floor(height - free) : null;
+    return free > 0 || measure.firm ? Math.floor(height - free) : null;
   }
   function settle(state, keep = false) {
     const fitted = state.gaveUp ? natural(state.box) : targetView(state.model, state.box, keep ? KEEP_GAIN : MIN_GAIN);
@@ -198,7 +198,7 @@ var DeckFit = (() => {
       if (spill > 2) {
         model.tall = grow(model.tall, Math.ceil(height + spill));
       } else if (side !== null && typeof report.vfree === "number") {
-        if (report.vfree > 0) model.tall = grow(model.tall, Math.floor(height - report.vfree));
+        if (report.vfree > 0 || report.firm) model.tall = grow(model.tall, Math.floor(height - report.vfree));
         else model.fills = grow(model.fills, Math.floor(height));
       }
       if (side !== null && report.tallest !== void 0) {

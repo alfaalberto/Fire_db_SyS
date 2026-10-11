@@ -814,9 +814,12 @@ export function slideBridgeRuntime() {
   var awaited = 0;
   var layoutWaits = 0;
   // Alto de las cajas principales en la medida anterior, y las que lo
-  // conservaron al cambiar el alto de la ventana: no dependen de ella.
+  // conservaron al cambiar el alto de la ventana: no dependen de ella. Se
+  // distingue el alto de su caja (lo que lleva dentro se recorta o desplaza
+  // por diseño) del que se ve en pantalla (tampoco se escala para llenarla).
   var boxHeights = typeof WeakMap === 'function' ? new WeakMap() : null;
   var rigidBoxes = typeof WeakSet === 'function' ? new WeakSet() : null;
+  var firmBoxes = typeof WeakSet === 'function' ? new WeakSet() : null;
   // Cajas con proporción: si su alto sale de su ancho y si ese ancho es libre.
   var ratioBoxes = typeof WeakMap === 'function' ? new WeakMap() : null;
   // Alto natural de las láminas que no están a la vista, y con qué ancho de
@@ -829,15 +832,17 @@ export function slideBridgeRuntime() {
   // Última medida de la lámina más alta de las ocultas, y con qué se tomó.
   var tallestMemo = null;
 
-  function noteHeight(el, vh) {
-    if (!boxHeights || !rigidBoxes) return;
+  function noteHeight(el, vh, seen) {
+    if (!boxHeights || !rigidBoxes || !firmBoxes) return;
     var height = el.clientHeight;
     var known = boxHeights.get(el);
-    if (!known) { boxHeights.set(el, [vh, height]); return; }
+    if (!known) { boxHeights.set(el, [vh, height, seen]); return; }
     if (Math.abs(known[0] - vh) <= 24) return;
     if (Math.abs(known[1] - height) <= 1) rigidBoxes.add(el);
     else rigidBoxes.delete(el);
-    boxHeights.set(el, [vh, height]);
+    if (Math.abs(known[2] - seen) <= 1) firmBoxes.add(el);
+    else firmBoxes.delete(el);
+    boxHeights.set(el, [vh, height, seen]);
   }
 
   // Qué clase de caja con proporción es `el`:
@@ -1118,7 +1123,8 @@ export function slideBridgeRuntime() {
    *   vin    lo mismo para su panel principal, si se desplaza por dentro;
    *   vown   ídem, cuando ese panel está en una caja de alto fijo: se
    *          desplaza por diseño, sea cual sea el tamaño de la ventana;
-   *   vcut   lo que la ventana o el contenedor principal recortan por abajo.
+   *   vcut   lo que la ventana o el contenedor principal recortan por abajo;
+   *   firm   su marco principal tiene un tamaño que no depende de la ventana.
    */
   function spareScan() {
     var vw = window.innerWidth;
@@ -1142,6 +1148,7 @@ export function slideBridgeRuntime() {
     var vown = 0;
     var vcut = 0;
     var fluidFrame = false;
+    var firmFrame = false;
     var area = vw * vh;
     var range = document.createRange();
 
@@ -1256,8 +1263,12 @@ export function slideBridgeRuntime() {
         var seenH = Math.min(box.bottom, vh) - Math.max(box.top, 0);
         var main = seenW > 0 && seenH > 0 && seenW * seenH >= area * 0.25;
         if (main) {
-          if (!scanSkip) noteHeight(node, vh);
+          if (!scanSkip) noteHeight(node, vh, h);
+          // Un marco que crece con el ancho de la ventana, o uno cuyo tamaño
+          // no depende de ella: su proporción y un ancho fijo, o lo que se
+          // vio al cambiar la ventana.
           if (ratioFluid(node)) fluidFrame = true;
+          else if (ratioKind(node) !== 0 || (firmBoxes && firmBoxes.has(node))) firmFrame = true;
         }
         if (!(node === body && bodyIsViewport)) {
           if (cs.overflowX !== 'visible') {
@@ -1333,7 +1344,7 @@ export function slideBridgeRuntime() {
       if (firstUsed === -1) firstUsed = y;
       lastUsed = y;
     }
-    var out = { side: -1, edge: 0, vfree: 0, vover: Math.ceil(vover), vdoc: Math.ceil(vdoc), vin: Math.ceil(vin), vown: Math.ceil(vown), vcut: Math.ceil(vcut) };
+    var out = { side: -1, edge: 0, vfree: 0, vover: Math.ceil(vover), vdoc: Math.ceil(vdoc), vin: Math.ceil(vin), vown: Math.ceil(vown), vcut: Math.ceil(vcut), firm: firmFrame };
     if (margins.length < 4) return out;
 
     // La columna es lo que ocupa la mayor parte de la altura; las barras de
@@ -1443,7 +1454,8 @@ export function slideBridgeRuntime() {
       msg.vin = spare.vin;
       msg.vown = spare.vown;
       msg.vcut = spare.vcut;
-      text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vdoc + '/' + spare.vin + '/' + spare.vown + '/' + spare.vcut;
+      msg.firm = spare.firm;
+      text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vdoc + '/' + spare.vin + '/' + spare.vown + '/' + spare.vcut + '/' + (spare.firm ? 1 : 0);
       // Y lo mismo para la lámina más alta de las que no están a la vista, si
       // puede servir de algo: con poco margen a los lados no hay qué ampliar
       // (mismo criterio que en `deck-fit`).
@@ -1453,8 +1465,8 @@ export function slideBridgeRuntime() {
         var other = null;
         try { other = tallestSlide(height); } catch (e2) { other = null; }
         // `null`: se midió y ninguna pide más alto que la visible.
-        msg.tallest = other ? { vfree: other.vfree, vover: other.vover, vdoc: other.vdoc, vin: other.vin, vown: other.vown, vcut: other.vcut } : null;
-        text += other ? '/' + other.vfree + '/' + other.vover + '/' + other.vdoc + '/' + other.vin + '/' + other.vown + '/' + other.vcut : '/-';
+        msg.tallest = other ? { vfree: other.vfree, vover: other.vover, vdoc: other.vdoc, vin: other.vin, vown: other.vown, vcut: other.vcut, firm: other.firm } : null;
+        text += other ? '/' + other.vfree + '/' + other.vover + '/' + other.vdoc + '/' + other.vin + '/' + other.vown + '/' + other.vcut + '/' + (other.firm ? 1 : 0) : '/-';
       }
     }
     if (text === lastLayout) return;
