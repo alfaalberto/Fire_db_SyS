@@ -1433,6 +1433,22 @@ export function slideBridgeRuntime() {
     } catch (e) {}
   }
 
+  // Lo que termina de aparecer o de moverse (una entrada animada con retraso,
+  // un panel que se despliega) cambia lo que hay a la vista: se mide de nuevo.
+  // Las transiciones menudas (el color de un botón al pasar el ratón) no.
+  var MOVES = /^(opacity|visibility|transform|height|max-height|min-height|width|max-width|top|bottom|left|right|margin|padding|flex|grid|inset|translate|scale)/;
+  function shownLater(ev) {
+    if (!wantSpare || !pageLoaded || layoutTimer) return;
+    var el = ev.target;
+    if (!el || el.nodeType !== 1) return;
+    if (ev.type === 'transitionend' && !MOVES.test(ev.propertyName || '')) return;
+    var box = el.getBoundingClientRect();
+    if (box.width * box.height < window.innerWidth * window.innerHeight * 0.02) return;
+    layoutSoon(320);
+  }
+  on(document, 'animationend', shownLater, true);
+  on(document, 'transitionend', shownLater, true);
+
   function loaded() {
     if (pageLoaded) return;
     pageLoaded = true;
