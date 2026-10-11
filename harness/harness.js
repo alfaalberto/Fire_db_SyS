@@ -41,7 +41,7 @@
     ]);
     var at = texts[0].indexOf('export function slideBridgeRuntime');
     var fn = texts[0].slice(at).replace('export function', 'function').replace(/\s+$/, '');
-    fn = fn.replace('function unsettled()', 'window.__sysSpare = spareScan; window.__sysGroup = findGroup; window.__sysShown = detectFromGroup; window.__sysTallest = tallestSlide; window.__sysRigid = inRigidBox; window.__sysT = { scan: [], tall: [] }; function unsettled()');
+    fn = fn.replace('function unsettled()', 'window.__sysSpare = spareScan; window.__sysGroup = findGroup; window.__sysShown = detectFromGroup; window.__sysTallest = tallestSlide; window.__sysRigid = inRigidBox; window.__sysRatio = ratioBound; window.__sysT = { scan: [], tall: [] }; function unsettled()');
     // Cronómetro de las dos medidas (solo en el banco).
     var a1 = 'try { spare = spareScan(); } catch (e) { spare = null; }';
     if (fn.indexOf(a1) === -1) throw new Error('no se encontró la llamada a spareScan');

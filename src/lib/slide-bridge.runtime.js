@@ -835,16 +835,23 @@ export function slideBridgeRuntime() {
   }
 
   /**
-   * El alto de `el` lo fija su ancho: tiene una proporción (una lámina 16:9) y
-   * recorta o desplaza lo que no le cabe, en lugar de crecer con ello.
+   * El alto de `el` lo fija su ancho: tiene una proporción (una lámina 16:9),
+   * no se le ha dado un alto propio (entonces sería el ancho el que saldría
+   * de él) y recorta o desplaza lo que no le cabe, en lugar de crecer con ello.
    */
   function ratioBound(el) {
     if (!ratioBoxes) return false;
     var known = ratioBoxes.get(el);
     if (known === undefined) {
+      known = false;
       var cs = getComputedStyle(el);
       var ratio = cs.aspectRatio;
-      known = !!ratio && ratio !== 'auto' && cs.overflowY !== 'visible';
+      if (ratio && ratio !== 'auto' && cs.overflowY !== 'visible' && cs.maxHeight === 'none' && typeof el.computedStyleMap === 'function') {
+        try {
+          var height = el.computedStyleMap().get('height');
+          known = !!height && height.value === 'auto';
+        } catch (e) { known = false; }
+      }
       ratioBoxes.set(el, known);
     }
     return known;
@@ -953,17 +960,24 @@ export function slideBridgeRuntime() {
       if (!column && parentStyle.display !== 'block' && parentStyle.display !== 'flow-root') return null;
     }
     // El marco que las contiene: el que las recorta o desplaza, o aquel sobre
-    // el que se apilan. Si su alto es fijo, o no llega al pie de la ventana,
-    // lo que no quepa en él se desplaza o se recorta por diseño con cualquier
-    // ventana: no es la ventana lo que limita a las láminas.
+    // el que se apilan. Si su alto es fijo, o no llega al pie de la ventana ni
+    // crece con ellas, lo que no quepa en él se desplaza o se recorta por
+    // diseño con cualquier ventana: no es la ventana lo que limita a las
+    // láminas.
     if (ratioBound(active)) return null;
     var host = stacked ? active.offsetParent : null;
     for (var up = parent; up && up !== document.body && up !== document.documentElement; up = up.parentElement) {
       if (getComputedStyle(up).overflowY !== 'visible') { host = up; break; }
     }
-    if (host && host !== document.body && host !== document.documentElement) {
-      if (inRigidBox(host) || host.getBoundingClientRect().bottom < vh * 0.9) return null;
+    if (host === document.body || host === document.documentElement) host = null;
+    var short = false;
+    if (host) {
+      if (inRigidBox(host)) return null;
+      short = host.getBoundingClientRect().bottom < vh * 0.9;
+      // (Apiladas, el marco no crece con ninguna.)
+      if (short && stacked) return null;
     }
+    var hostHeight = host ? host.offsetHeight : 0;
 
     // Los altos ya medidos valen mientras la ventana no cambie el ancho de las
     // láminas (una columna de ancho fijo lo conserva). De una lámina a otra no
@@ -1007,14 +1021,24 @@ export function slideBridgeRuntime() {
       active.style.setProperty('position', 'fixed', 'important');
     }
     var st = tallest.style;
-    if (gone) st.setProperty('display', activeStyle.display, 'important');
-    else st.setProperty('transition', 'none', 'important');
+    if (gone) {
+      st.setProperty('display', activeStyle.display, 'important');
+    } else {
+      st.setProperty('transition', 'none', 'important');
+      // Apartada con un desplazamiento o una escala que la visible no tiene.
+      var hidden = getComputedStyle(tallest);
+      if (activeStyle.transform === 'none' && hidden.transform !== 'none') st.setProperty('transform', 'none', 'important');
+      if (activeStyle.translate === 'none' && hidden.translate && hidden.translate !== 'none') st.setProperty('translate', 'none', 'important');
+      if (activeStyle.scale === 'none' && hidden.scale && hidden.scale !== 'none') st.setProperty('scale', 'none', 'important');
+    }
     st.setProperty('visibility', 'visible', 'important');
     st.setProperty('opacity', '1', 'important');
     var result = null;
     scanSkip = active;
     try { result = spareScan(); } catch (e) { result = null; }
     scanSkip = null;
+    // Un marco que no llega al pie de la ventana y tampoco creció con ella.
+    if (short && host.offsetHeight <= hostHeight + 1) result = null;
     restoreStyle(tallest, savedTallest, !gone);
     if (!stacked) restoreStyle(active, savedActive, true);
     if (!stacked || !gone) {
