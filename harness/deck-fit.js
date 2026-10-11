@@ -153,7 +153,6 @@ var DeckFit = (() => {
     if (((_a = report.vown) != null ? _a : 0) > 2) model.inner = true;
     const content = (_b = report.vover) != null ? _b : 0;
     const whole = (_c = report.vdoc) != null ? _c : 0;
-    if (!zoomed && content <= 2 && whole > model.slack) model.slack = whole;
     const outer = scrolls.includes(slide) ? 0 : zoomed ? Math.max(content, whole - model.slack) : content;
     const inner = model.inner ? 0 : Math.max((_d = report.vin) != null ? _d : 0, (_e = report.vcut) != null ? _e : 0);
     let spill = Math.max(outer, inner);
@@ -170,6 +169,7 @@ var DeckFit = (() => {
     } else if (chase && chase.slide === slide && height > chase.height + 1 && spill >= chase.spill * FIT_PROGRESS) {
       model.tall = chase.base;
       if (inner >= outer) model.inner = true;
+      else if (content <= 2) model.slack = Math.max(model.slack, whole);
       else scrolls = [...scrolls, slide];
       chase = null;
       spill = 0;

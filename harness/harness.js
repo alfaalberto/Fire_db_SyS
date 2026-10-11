@@ -309,18 +309,11 @@
     if (!opts.keep) H.unhost();
   };
 
-  /**
-   * Recorre las láminas de una presentación con su propia navegación (la que
-   * usa el modo presentación) y anota, en cada una, el tamaño y si algo no cabe.
-   */
-  H.walk = async function (deck, W, Hh, opts) {
+  // Recorre las láminas de una presentación ya abierta.
+  H.walkHandle = async function (h, opts) {
     opts = opts || {};
-    var h = H.openDeck(deck, W, Hh, Object.assign({ presenting: true }, opts));
-    var first = await h.settle(opts.max || 9000);
-    await H.sleep(350); h.remeasure(); await H.sleep(120); await h.settle(5000);
     var slides = [];
     var changes = 0;
-    var initial = h.log.filter(function (l) { return l.view; }).length;
     var lastView = h.state.view.width;
     var guard = 0;
     while (guard++ < (opts.limit || 45)) {
@@ -343,9 +336,73 @@
       if (now === before && h.log.length === logBefore) break;
       if (now === before && before !== -1) break;
     }
-    var out = { first: first, initial: initial, slides: slides, changes: changes, model: h.state.model, scrolls: h.state.scrolls, z: +h.state.view.scale.toFixed(3), log: h.log.length, errors: h.errors.slice(0, 3) };
+    return { slides: slides, changes: changes };
+  };
+
+  /**
+   * Recorre las láminas de una presentación con su propia navegación (la que
+   * usa el modo presentación) y anota, en cada una, el tamaño y si algo no cabe.
+   */
+  H.walk = async function (deck, W, Hh, opts) {
+    opts = opts || {};
+    var h = H.openDeck(deck, W, Hh, Object.assign({ presenting: true }, opts));
+    var first = await h.settle(opts.max || 9000);
+    await H.sleep(350); h.remeasure(); await H.sleep(120); await h.settle(5000);
+    var initial = h.log.filter(function (l) { return l.view; }).length;
+    var res = await H.walkHandle(h, opts);
+    var out = { first: first, initial: initial, slides: res.slides, changes: res.changes, model: h.state.model, scrolls: h.state.scrolls, z: +h.state.view.scale.toFixed(3), log: h.log.length, errors: h.errors.slice(0, 3) };
     h.close();
     return out;
+  };
+
+  /**
+   * El recorrido real de una clase: se abre en la ventana normal, se pulsa
+   * «Presentar» (pantalla completa), se pasan todas las láminas y se sale.
+   */
+  H.present = async function (deck, normal, full, opts) {
+    opts = opts || {};
+    var h = H.openDeck(deck, normal[0], normal[1], { model: opts.model || null });
+    await h.settle(9000);
+    await H.sleep(300); h.remeasure(); await H.sleep(120); await h.settle(5000);
+    var zNormal = +h.state.view.scale.toFixed(3);
+    var before = h.log.length;
+    h.resize(full[0], full[1]);
+    var zEnter = +h.state.view.scale.toFixed(3);
+    await H.sleep(250);
+    await h.settle(6000);
+    var moves = h.log.slice(before).filter(function (l) { return l.view; }).length;
+    var zFull = +h.state.view.scale.toFixed(3);
+    var res = await H.walkHandle(h, opts);
+    var zEnd = +h.state.view.scale.toFixed(3);
+    h.resize(normal[0], normal[1]);
+    var zBackAt = +h.state.view.scale.toFixed(3);
+    await H.sleep(250);
+    await h.settle(6000);
+    var zBack = +h.state.view.scale.toFixed(3);
+    var out = { zNormal: zNormal, zEnter: zEnter, zFull: zFull, moves: moves, slides: res.slides, changes: res.changes, zEnd: zEnd, zBackAt: zBackAt, zBack: zBack, model: h.state.model, scrolls: h.state.scrolls, errors: h.errors.slice(0, 3) };
+    h.close();
+    return out;
+  };
+
+  H.presentAll = async function (name, normal, full, opts) {
+    opts = opts || {};
+    var job = (H.jobs[name] = { done: 0, total: 0, running: true, started: Date.now(), results: {}, errors: [] });
+    var list = (opts.which ? opts.which.map(function (l) { return H.decks.find(function (d) { return d.label === l; }); }) : H.decks).filter(function (d) { return d && H.isDoc(d.html); });
+    job.total = list.length;
+    var next = 0;
+    async function work() {
+      while (next < list.length) {
+        var deck = list[next++];
+        try { job.results[deck.label] = await H.present(deck, normal, full, { model: opts.models ? opts.models[deck.label] || null : null }); }
+        catch (e) { job.errors.push(deck.label + ': ' + (e && e.stack || e)); }
+        job.done++;
+      }
+    }
+    var workers = [];
+    for (var i = 0; i < (opts.conc || 6); i++) workers.push(work());
+    await Promise.all(workers);
+    job.running = false; job.ms = Date.now() - job.started;
+    H.unhost();
   };
 
   /** Cambia el marco (ventana normal ↔ pantalla completa) y anota cómo responde el tamaño. */
