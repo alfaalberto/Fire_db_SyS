@@ -802,6 +802,79 @@ export function slideBridgeRuntime() {
   // Ancho con el que la app espera la próxima medida (tras cambiar el tamaño).
   var awaited = 0;
   var layoutWaits = 0;
+  // Alto de las cajas principales en la medida anterior, y las que lo
+  // conservaron al cambiar el alto de la ventana: no dependen de ella.
+  var boxHeights = typeof WeakMap === 'function' ? new WeakMap() : null;
+  var rigidBoxes = typeof WeakSet === 'function' ? new WeakSet() : null;
+  // Alto de las láminas que no están a la vista, medido con cierto ancho.
+  var slideHeights = typeof WeakMap === 'function' ? new WeakMap() : null;
+  var slideHeightsAt = 0;
+
+  function noteHeight(el, vh) {
+    if (!boxHeights || !rigidBoxes) return;
+    var height = el.clientHeight;
+    var known = boxHeights.get(el);
+    if (!known) { boxHeights.set(el, [vh, height]); return; }
+    if (Math.abs(known[0] - vh) <= 24) return;
+    if (Math.abs(known[1] - height) <= 1) rigidBoxes.add(el);
+    else rigidBoxes.delete(el);
+    boxHeights.set(el, [vh, height]);
+  }
+
+  /** `el` está dentro de una caja cuyo alto no depende de la ventana. */
+  function inRigidBox(el) {
+    if (!rigidBoxes) return false;
+    for (var node = el; node && node !== document.documentElement; node = node.parentElement) {
+      if (rigidBoxes.has(node)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Cuánto más alta que la lámina a la vista es la más alta de las demás.
+   * Las que están ocultas con `display:none` no tienen medidas: se les da un
+   * instante, sin llegar a pintarse, las de la lámina visible. Así el tamaño
+   * se elige de una vez para toda la presentación y no hay que corregirlo al
+   * llegar a una lámina más larga. Solo para láminas puestas una tras otra en
+   * el flujo; las apiladas en un marco miden lo que el marco.
+   */
+  function tallerSlides() {
+    if (!slideHeights) return 0;
+    var g = findGroup();
+    var shown = detectFromGroup();
+    if (!g || !shown || !shown.el || g.nodes.length > 80) return 0;
+    var active = shown.el;
+    var parent = active.parentElement;
+    if (!parent) return 0;
+    var activeStyle = getComputedStyle(active);
+    if (activeStyle.position === 'absolute' || activeStyle.position === 'fixed' || activeStyle.display === 'none') return 0;
+    var parentStyle = getComputedStyle(parent);
+    var flow = parentStyle.display === 'block' || parentStyle.display === 'flow-root';
+    var column = (parentStyle.display === 'flex' || parentStyle.display === 'inline-flex') && parentStyle.flexDirection.indexOf('column') === 0;
+    if (!flow && !column) return 0;
+    var width = window.innerWidth;
+    if (width !== slideHeightsAt) { slideHeights = new WeakMap(); slideHeightsAt = width; }
+    var base = active.getBoundingClientRect().height;
+    var extra = 0;
+    for (var i = 0; i < g.nodes.length; i++) {
+      var el = g.nodes[i];
+      if (el === active || el.parentElement !== parent) continue;
+      var height = slideHeights.get(el);
+      if (height === undefined) {
+        if (getComputedStyle(el).display !== 'none') continue;
+        var style = el.getAttribute('style');
+        el.style.setProperty('display', activeStyle.display, 'important');
+        el.style.setProperty('visibility', 'hidden', 'important');
+        if (column) el.style.setProperty('flex', 'none', 'important');
+        height = el.getBoundingClientRect().height;
+        if (style === null) el.removeAttribute('style');
+        else el.setAttribute('style', style);
+        slideHeights.set(el, height);
+      }
+      if (height - base > extra) extra = height - base;
+    }
+    return extra;
+  }
 
   function alphaOf(color) {
     if (!color || color === 'transparent') return 0;
@@ -838,6 +911,8 @@ export function slideBridgeRuntime() {
    *   vfree  altura que queda vacía (franjas grandes sin nada dibujado);
    *   vover  lo que hay que desplazar el documento para verlo entero;
    *   vin    lo mismo para su panel principal, si se desplaza por dentro;
+   *   vown   ídem, cuando ese panel está en una caja de alto fijo: se
+   *          desplaza por diseño, sea cual sea el tamaño de la ventana;
    *   vcut   lo que la ventana o el contenedor principal recortan por abajo.
    */
   function spareScan() {
@@ -858,6 +933,7 @@ export function slideBridgeRuntime() {
     var aborted = false;
     var vover = 0;
     var vin = 0;
+    var vown = 0;
     var vcut = 0;
     var area = vw * vh;
     var range = document.createRange();
@@ -968,6 +1044,7 @@ export function slideBridgeRuntime() {
         var seenW = Math.min(box.right, vw) - Math.max(box.left, 0);
         var seenH = Math.min(box.bottom, vh) - Math.max(box.top, 0);
         var main = seenW > 0 && seenH > 0 && seenW * seenH >= area * 0.25;
+        if (main) noteHeight(node, vh);
         if (!(node === body && bodyIsViewport)) {
           if (cs.overflowX !== 'visible') {
             if (box.left > nx0) nx0 = box.left;
@@ -981,9 +1058,10 @@ export function slideBridgeRuntime() {
               // Lo que quede más abajo se alcanza desplazando el panel.
               scroller = true;
               nhard = Infinity;
-            } else if (!main) {
+            } else if (!main || inRigidBox(node)) {
               // Un recorte pequeño (un acordeón plegado, un texto abreviado)
-              // esconde a propósito: lo de dentro no es contenido cortado.
+              // o de alto fijo esconde a propósito, con cualquier ventana:
+              // lo de dentro no es contenido que la ampliación haya cortado.
               nhard = Infinity;
             } else if (box.bottom < nhard) {
               nhard = box.bottom;
@@ -1000,7 +1078,10 @@ export function slideBridgeRuntime() {
         if (scroller && main) {
           // El panel principal (no un bloque de código ni una lista lateral).
           var inner = node.scrollHeight - node.clientHeight;
-          if (inner > 2 && inner > vin) vin = inner;
+          if (inner > 2) {
+            if (inRigidBox(node)) { if (inner > vown) vown = inner; }
+            else if (inner > vin) vin = inner;
+          }
         }
         // Una caja con algo dentro: una tarjeta, la propia lámina. De lado a
         // lado es una barra o un fondo: la columna la define lo que lleva
@@ -1030,7 +1111,7 @@ export function slideBridgeRuntime() {
       if (firstUsed === -1) firstUsed = y;
       lastUsed = y;
     }
-    var out = { side: -1, edge: 0, vfree: 0, vover: Math.ceil(vover), vin: Math.ceil(vin), vcut: Math.ceil(vcut) };
+    var out = { side: -1, edge: 0, vfree: 0, vover: Math.ceil(vover), vin: Math.ceil(vin), vown: Math.ceil(vown), vcut: Math.ceil(vcut) };
     if (margins.length < 4) return out;
 
     // La columna es lo que ocupa la mayor parte de la altura; las barras de
@@ -1136,8 +1217,12 @@ export function slideBridgeRuntime() {
       msg.vfree = spare.vfree;
       msg.vover = spare.vover;
       msg.vin = spare.vin;
+      msg.vown = spare.vown;
       msg.vcut = spare.vcut;
-      text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vin + '/' + spare.vcut;
+      var more = 0;
+      try { more = Math.ceil(tallerSlides()); } catch (e2) { more = 0; }
+      msg.vmore = more;
+      text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vin + '/' + spare.vown + '/' + spare.vcut + '/' + more;
     }
     if (text === lastLayout) return;
     lastLayout = text;

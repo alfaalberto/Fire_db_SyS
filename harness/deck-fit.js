@@ -114,7 +114,7 @@ var DeckFit = (() => {
     return createFit(state.box, state.enabled, null);
   }
   function reportFit(state, report) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f;
     const { box } = state;
     const need = Number(report.need);
     const width = Number(report.width);
@@ -151,11 +151,12 @@ var DeckFit = (() => {
       widened = false;
     }
     const slide = typeof report.slide === "number" ? report.slide : -1;
-    const outer = scrolls.includes(slide) ? 0 : (_a = report.vover) != null ? _a : 0;
-    const inner = model.inner ? 0 : Math.max((_b = report.vin) != null ? _b : 0, (_c = report.vcut) != null ? _c : 0);
+    if (((_a = report.vown) != null ? _a : 0) > 2) model.inner = true;
+    const outer = scrolls.includes(slide) ? 0 : (_b = report.vover) != null ? _b : 0;
+    const inner = model.inner ? 0 : Math.max((_c = report.vin) != null ? _c : 0, (_d = report.vcut) != null ? _d : 0);
     let spill = Math.max(outer, inner);
     if (!zoomed) {
-      if (inner > 2 && ((_d = report.vfree) != null ? _d : 0) >= box.height * INNER_FREE) {
+      if (inner > 2 && ((_e = report.vfree) != null ? _e : 0) >= box.height * INNER_FREE) {
         model.inner = true;
         if (chase) model.tall = chase.base;
         spill = outer;
@@ -179,7 +180,9 @@ var DeckFit = (() => {
     if (side !== null && side >= Math.max(MIN_MARGIN, width * MIN_MARGIN_RATIO) && !isFluid(model, side / width)) {
       const edge = typeof report.edge === "number" && report.edge > 0 ? report.edge : 0;
       model.col = grow(model.col, Math.ceil(width - 2 * side + 2 * Math.max(GUTTER, edge + EDGE_GAP)));
-      if (!zoomed && spill <= 2 && typeof report.vfree === "number") model.tall = grow(model.tall, Math.max(0, Math.floor(height - report.vfree)));
+      if (!zoomed && spill <= 2 && typeof report.vfree === "number") {
+        model.tall = grow(model.tall, Math.max(0, Math.floor(height - report.vfree + Math.max(0, (_f = report.vmore) != null ? _f : 0))));
+      }
     }
     let next = settle({ ...state, model, over, widened, trial, tries, scrolls, chase });
     if (!sameView(next.view, state.view) && next.view.width < state.view.width) {
