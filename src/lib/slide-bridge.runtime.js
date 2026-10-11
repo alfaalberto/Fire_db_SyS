@@ -811,7 +811,7 @@ export function slideBridgeRuntime() {
   // conservaron al cambiar el alto de la ventana: no dependen de ella.
   var boxHeights = typeof WeakMap === 'function' ? new WeakMap() : null;
   var rigidBoxes = typeof WeakSet === 'function' ? new WeakSet() : null;
-  // Cajas cuyo alto sale de una proporción (true) o no (false).
+  // Cajas con proporción: si su alto sale de su ancho y si ese ancho es libre.
   var ratioBoxes = typeof WeakMap === 'function' ? new WeakMap() : null;
   // Alto natural de las láminas que no están a la vista, y con qué ancho de
   // lámina y de ventana se midió.
@@ -834,27 +834,49 @@ export function slideBridgeRuntime() {
     boxHeights.set(el, [vh, height]);
   }
 
-  /**
-   * El alto de `el` lo fija su ancho: tiene una proporción (una lámina 16:9),
-   * no se le ha dado un alto propio (entonces sería el ancho el que saldría
-   * de él) y recorta o desplaza lo que no le cabe, en lugar de crecer con ello.
-   */
-  function ratioBound(el) {
-    if (!ratioBoxes) return false;
+  // Qué clase de caja con proporción es `el`:
+  //   0  ninguna (o no se puede saber);
+  //   1  su alto sale de su ancho, y ese ancho es fijo;
+  //   2  ídem, y su ancho sigue al de la ventana (hasta un tope, si lo tiene).
+  function ratioKind(el) {
+    if (!ratioBoxes) return 0;
     var known = ratioBoxes.get(el);
     if (known === undefined) {
-      known = false;
+      known = 0;
       var cs = getComputedStyle(el);
       var ratio = cs.aspectRatio;
+      // Tiene una proporción (una lámina 16:9), no se le ha dado un alto propio
+      // (entonces sería el ancho el que saldría de él) y recorta o desplaza lo
+      // que no le cabe, en lugar de crecer con ello.
       if (ratio && ratio !== 'auto' && cs.overflowY !== 'visible' && cs.maxHeight === 'none' && typeof el.computedStyleMap === 'function') {
         try {
-          var height = el.computedStyleMap().get('height');
-          known = !!height && height.value === 'auto';
-        } catch (e) { known = false; }
+          var map = el.computedStyleMap();
+          var height = map.get('height');
+          if (height && height.value === 'auto') {
+            var width = map.get('width');
+            known = width && (width.value === 'auto' || width.unit === 'percent') ? 2 : 1;
+          }
+        } catch (e) { known = 0; }
       }
       ratioBoxes.set(el, known);
     }
     return known;
+  }
+
+  /** El alto de `el` lo fija su ancho, no la ventana. */
+  function ratioBound(el) {
+    return ratioKind(el) !== 0;
+  }
+
+  /**
+   * `el` es una caja con proporción que crece con el ancho de la ventana (no
+   * ha llegado a su tope): su tamaño en pantalla ya lo decide la ventana, y
+   * ampliar la presentación no la haría más grande.
+   */
+  function ratioFluid(el) {
+    if (ratioKind(el) !== 2) return false;
+    var cap = parseFloat(getComputedStyle(el).maxWidth);
+    return !(cap > 0) || /%$/.test(getComputedStyle(el).maxWidth) || el.offsetWidth < cap - 1;
   }
 
   /**
@@ -1113,6 +1135,7 @@ export function slideBridgeRuntime() {
     var vin = 0;
     var vown = 0;
     var vcut = 0;
+    var fluidFrame = false;
     var area = vw * vh;
     var range = document.createRange();
 
@@ -1226,7 +1249,10 @@ export function slideBridgeRuntime() {
         var seenW = Math.min(box.right, vw) - Math.max(box.left, 0);
         var seenH = Math.min(box.bottom, vh) - Math.max(box.top, 0);
         var main = seenW > 0 && seenH > 0 && seenW * seenH >= area * 0.25;
-        if (main && !scanSkip) noteHeight(node, vh);
+        if (main) {
+          if (!scanSkip) noteHeight(node, vh);
+          if (ratioFluid(node)) fluidFrame = true;
+        }
         if (!(node === body && bodyIsViewport)) {
           if (cs.overflowX !== 'visible') {
             if (box.left > nx0) nx0 = box.left;
@@ -1343,8 +1369,9 @@ export function slideBridgeRuntime() {
     }
     if (side < 0) side = 0;
     if (edge > side) edge = side;
-    out.side = Math.floor(side);
-    out.edge = Math.ceil(edge);
+    // (Con un marco que crece con la ventana no hay margen que aprovechar.)
+    out.side = fluidFrame ? -1 : Math.floor(side);
+    out.edge = fluidFrame ? 0 : Math.ceil(edge);
 
     // Franjas vacías grandes: altura que la presentación no usa. Las pequeñas
     // son la separación entre sus bloques, y de las grandes se respeta un poco.
