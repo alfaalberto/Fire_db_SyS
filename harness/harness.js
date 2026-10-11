@@ -224,7 +224,10 @@
     }
     function send(msg) { msg.__sys = token; frame.contentWindow.postMessage(msg, '*'); }
     function sendHelper(msg) { msg.__helper = token; frame.contentWindow.postMessage(msg, '*'); }
-    function measure() { send({ t: 'measure', spare: opts.spare !== undefined ? opts.spare : fit.canZoom(state.box), width: state.view.width }); }
+    var screenBox = opts.screen === undefined ? { width: 1920, height: 1080 } : opts.screen;
+    var ahead = 0;
+    function measure() { ahead = fit.forecastNeed(state, screenBox); send({ t: 'measure', spare: opts.spare !== undefined ? opts.spare : fit.canZoom(state.box), width: state.view.width, ahead: ahead }); }
+    function syncAhead() { var want = fit.forecastNeed(state, screenBox); if (want !== ahead && ready) { ahead = want; send({ t: 'ahead', ahead: want }); } }
     function onMsg(ev) {
       if (ev.source !== frame.contentWindow) return;
       var d = ev.data;
@@ -247,6 +250,7 @@
         var tallNeed = tl ? (tl.vover > 2 ? d.height + Math.max(tl.vover, tl.vdoc || 0) : d.height - (tl.vfree || 0)) : null;
         log.push({ at: Math.round(performance.now() - t0), r: [d.width, d.height, d.need, d.side, d.edge, d.vfree, d.vover, d.vin, d.vcut, d.slide, d.vown, tallNeed === null ? 0 : Math.round(tallNeed - ownNeed), d.vdoc], t: tl, stale: state === before ? 1 : 0, view: changed ? [state.view.width, Math.round(state.view.height), +state.view.scale.toFixed(3)] : null });
         if (changed) { apply(); sendHelper({ t: 'resize' }); measure(); }
+        else syncAhead();
       }
     }
     window.addEventListener('message', onMsg);

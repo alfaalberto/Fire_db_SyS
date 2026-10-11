@@ -29,6 +29,7 @@ var DeckFit = (() => {
     canZoom: () => canZoom,
     createFit: () => createFit,
     enableFit: () => enableFit,
+    forecastNeed: () => forecastNeed,
     forgetModel: () => forgetModel,
     recallModel: () => recallModel,
     rememberModel: () => rememberModel,
@@ -71,6 +72,12 @@ var DeckFit = (() => {
   }
   function canZoom(box) {
     return box.width >= DESIGN_WIDTH * (1 + MIN_GAIN) && box.height > 0;
+  }
+  function forecastNeed(state, screen = null) {
+    if (state.gaveUp || state.view.scale !== 1 || !canZoom(state.box)) return 0;
+    if (state.model.col === null) return 1;
+    const best = screen ? { width: Math.max(screen.width, state.box.width), height: Math.max(screen.height, state.box.height) } : state.box;
+    return targetView({ ...state.model, ahead: null }, best).scale > 1 ? 2 : 0;
   }
   function targetView(model, box) {
     var _a, _b;
@@ -182,7 +189,7 @@ var DeckFit = (() => {
       } else if (side !== null && typeof report.vfree === "number") {
         model.tall = grow(model.tall, Math.max(0, Math.floor(height - report.vfree)));
       }
-      if (side !== null) model.ahead = report.tallest ? needOf(report.tallest, model, height, box) : null;
+      if (side !== null && report.tallest !== void 0) model.ahead = report.tallest ? needOf(report.tallest, model, height, box) : null;
       chase = null;
     } else if (spill <= 2) {
       chase = null;

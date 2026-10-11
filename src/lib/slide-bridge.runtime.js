@@ -801,6 +801,9 @@ export function slideBridgeRuntime() {
   var SPARE_MEDIA = /^(IMG|SVG|CANVAS|VIDEO|IFRAME|OBJECT|EMBED)$/i;
   var SPARE_KATEX = /(^|\s)katex(\s|$)/;
   var wantSpare = !!cfg.spare;
+  // Si a la app le sirve además la medida de las láminas que no están a la
+  // vista: 0 no; 1 solo si la visible deja margen a los lados; 2 sí.
+  var wantAhead = 0;
   // Ancho con el que la app espera la próxima medida (tras cambiar el tamaño).
   var awaited = 0;
   var layoutWaits = 0;
@@ -810,11 +813,11 @@ export function slideBridgeRuntime() {
   var rigidBoxes = typeof WeakSet === 'function' ? new WeakSet() : null;
   // Cajas cuyo alto sale de una proporción (true) o no (false).
   var ratioBoxes = typeof WeakMap === 'function' ? new WeakMap() : null;
-  // Alto natural de las láminas que no están a la vista, medido con cierto ancho.
+  // Alto natural de las láminas que no están a la vista, y con qué ancho de
+  // lámina y de ventana se midió.
   var slideHeights = typeof WeakMap === 'function' ? new WeakMap() : null;
-  var slideHeightsAt = 0;
-  var slideHeightsSince = 0;
-  var loadedAt = 0;
+  var slideHeightsAt = -1;
+  var slideHeightsView = -1;
   // Lámina que la medida pasa por alto: se está midiendo otra puesta en su lugar.
   var scanSkip = null;
   // Última medida de la lámina más alta de las ocultas, y con qué se tomó.
@@ -962,14 +965,13 @@ export function slideBridgeRuntime() {
       if (inRigidBox(host) || host.getBoundingClientRect().bottom < vh * 0.9) return null;
     }
 
-    var width = window.innerWidth;
-    var now = Date.now();
-    // Recién cargada, lo que llevan dentro aún puede cambiar (imágenes,
-    // gráficas que se dibujan después): lo medido entonces vale poco tiempo.
-    var fresh = loadedAt && now - loadedAt < 10000 && now - slideHeightsSince > 2500;
-    if (width !== slideHeightsAt || fresh) { slideHeights = new WeakMap(); slideHeightsAt = width; slideHeightsSince = now; tallestMemo = null; }
-    if (tallestMemo && tallestMemo.active === active && tallestMemo.vh === vh && now - tallestMemo.at < 1500) return tallestMemo.result;
-
+    // Los altos ya medidos valen mientras la ventana no cambie el ancho de las
+    // láminas (una columna de ancho fijo lo conserva). De una lámina a otra no
+    // se vuelven a medir, aunque no todas midan lo mismo de ancho.
+    if (window.innerWidth !== slideHeightsView) {
+      slideHeightsView = window.innerWidth;
+      if (active.offsetWidth !== slideHeightsAt) { slideHeights = new WeakMap(); slideHeightsAt = active.offsetWidth; tallestMemo = null; }
+    }
     var pending = [];
     var i;
     var el;
@@ -989,36 +991,40 @@ export function slideBridgeRuntime() {
     // Lo que ocupa la visible, con lo que sobresalga de su caja.
     var edges = active.offsetHeight - active.clientHeight;
     var own = Math.max(active.offsetHeight, active.scrollHeight + (edges > 0 ? edges : 0));
-    var result = null;
-    if (tallest && need > own + 2) {
-      var savedActive = active.getAttribute('style');
-      var savedTallest = tallest.getAttribute('style');
-      var gone = getComputedStyle(tallest).display === 'none';
-      // La visible deja su sitio (sin ocultarse: no se reinician sus
-      // animaciones) y la otra lo ocupa, a la vista para la medida.
-      if (!stacked) {
-        active.style.setProperty('transition', 'none', 'important');
-        active.style.setProperty('position', 'fixed', 'important');
-      }
-      var st = tallest.style;
-      if (gone) st.setProperty('display', activeStyle.display, 'important');
-      else st.setProperty('transition', 'none', 'important');
-      st.setProperty('visibility', 'visible', 'important');
-      st.setProperty('opacity', '1', 'important');
-      scanSkip = active;
-      try { result = spareScan(); } catch (e) { result = null; }
-      scanSkip = null;
-      var held = !stacked || !gone;
-      restoreStyle(tallest, savedTallest, !gone);
-      if (!stacked) restoreStyle(active, savedActive, true);
-      if (held) {
-        void document.body.offsetHeight;
-        restoreStyle(tallest, savedTallest, false);
-        if (!stacked) restoreStyle(active, savedActive, false);
-      }
-      if (result && result.side < 0) result = null;
+    if (!tallest || need <= own + 2) return null;
+    // La más alta pide lo mismo esté a la vista una lámina u otra: su medida
+    // vale mientras no cambie la ventana.
+    if (tallestMemo && tallestMemo.el === tallest && tallestMemo.vh === vh && tallestMemo.vw === window.innerWidth) return tallestMemo.result;
+
+    var savedActive = active.getAttribute('style');
+    var savedTallest = tallest.getAttribute('style');
+    var gone = getComputedStyle(tallest).display === 'none';
+    // La visible deja su sitio (sin ocultarse: sus animaciones no se
+    // reinician) y la otra lo ocupa, a la vista para la medida. Lo que ya
+    // ocupaba sitio se cambia sin transiciones.
+    if (!stacked) {
+      active.style.setProperty('transition', 'none', 'important');
+      active.style.setProperty('position', 'fixed', 'important');
     }
-    tallestMemo = { active: active, vh: vh, at: now, result: result };
+    var st = tallest.style;
+    if (gone) st.setProperty('display', activeStyle.display, 'important');
+    else st.setProperty('transition', 'none', 'important');
+    st.setProperty('visibility', 'visible', 'important');
+    st.setProperty('opacity', '1', 'important');
+    var result = null;
+    scanSkip = active;
+    try { result = spareScan(); } catch (e) { result = null; }
+    scanSkip = null;
+    restoreStyle(tallest, savedTallest, !gone);
+    if (!stacked) restoreStyle(active, savedActive, true);
+    if (!stacked || !gone) {
+      // Con los valores de antes ya aplicados, se quita el freno.
+      void document.body.offsetHeight;
+      restoreStyle(tallest, savedTallest, false);
+      if (!stacked) restoreStyle(active, savedActive, false);
+    }
+    if (result && result.side < 0) result = null;
+    tallestMemo = { el: tallest, vh: vh, vw: window.innerWidth, result: result };
     return result;
   }
 
@@ -1381,12 +1387,15 @@ export function slideBridgeRuntime() {
       msg.vown = spare.vown;
       msg.vcut = spare.vcut;
       text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vdoc + '/' + spare.vin + '/' + spare.vown + '/' + spare.vcut;
-      // Y lo mismo para la lámina más alta de las que no están a la vista.
-      var other = null;
-      try { other = tallestSlide(height); } catch (e2) { other = null; }
-      if (other) {
-        msg.tallest = { vfree: other.vfree, vover: other.vover, vdoc: other.vdoc, vin: other.vin, vown: other.vown, vcut: other.vcut };
-        text += '/' + other.vfree + '/' + other.vover + '/' + other.vdoc + '/' + other.vin + '/' + other.vown + '/' + other.vcut;
+      // Y lo mismo para la lámina más alta de las que no están a la vista, si
+      // puede servir de algo: con poco margen a los lados no hay qué ampliar
+      // (mismo criterio que en `deck-fit`).
+      if (wantAhead === 2 || (wantAhead === 1 && spare.side >= Math.max(24, width * 0.05))) {
+        var other = null;
+        try { other = tallestSlide(height); } catch (e2) { other = null; }
+        // `null`: se midió y ninguna pide más alto que la visible.
+        msg.tallest = other ? { vfree: other.vfree, vover: other.vover, vdoc: other.vdoc, vin: other.vin, vown: other.vown, vcut: other.vcut } : null;
+        text += other ? '/' + other.vfree + '/' + other.vover + '/' + other.vdoc + '/' + other.vin + '/' + other.vown + '/' + other.vcut : '/-';
       }
     }
     if (text === lastLayout) return;
@@ -1497,12 +1506,14 @@ export function slideBridgeRuntime() {
       // `spare`: si a la app le sirve saber cuánto espacio queda libre.
       // `width`: el ancho que acaba de darle al marco; se mide cuando llega.
       if (typeof data.spare === 'boolean') wantSpare = data.spare;
+      wantAhead = data.ahead === 2 ? 2 : data.ahead === 1 ? 1 : 0;
       lastLayout = '';
       awaited = typeof data.width === 'number' && data.width > 0 ? data.width : 0;
       if (!pageLoaded) return;
       if (!awaited || Math.abs(window.innerWidth - awaited) <= 1) { awaited = 0; layoutSoon(30); }
       else layoutSoon(700);
     }
+    else if (data.t === 'ahead') { wantAhead = data.ahead === 2 ? 2 : data.ahead === 1 ? 1 : 0; }
     else if (data.t === 'nav') { step(data.dir > 0 ? 1 : -1, null); }
     else if (data.t === 'focus') { try { window.focus(); } catch (e) {} }
     else if (data.t === 'theme' && cfg.fragment) { document.documentElement.setAttribute('data-theme', data.theme === 'light' ? 'light' : 'dark'); }
@@ -1557,7 +1568,6 @@ export function slideBridgeRuntime() {
   function loaded() {
     if (pageLoaded) return;
     pageLoaded = true;
-    loadedAt = Date.now();
     scheduleMath(150);
     // Plazo para que la presentación haga su propio repaso antes de suplirlo.
     setTimeout(function () { graceOver = true; scheduleMath(0); }, 1200);
