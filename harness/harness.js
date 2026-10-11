@@ -236,7 +236,7 @@
         var before = state;
         state = fit.reportFit(state, d);
         var changed = Math.abs(state.view.width - before.view.width) >= 1 || Math.abs(state.view.height - before.view.height) >= 1;
-        log.push({ at: Math.round(performance.now() - t0), r: [d.width, d.height, d.need, d.side, d.edge, d.vfree, d.vover, d.vcut, d.slide], stale: state === before ? 1 : 0, view: changed ? [state.view.width, Math.round(state.view.height), +state.view.scale.toFixed(3)] : null });
+        log.push({ at: Math.round(performance.now() - t0), r: [d.width, d.height, d.need, d.side, d.edge, d.vfree, d.vover, d.vin, d.vcut, d.slide], stale: state === before ? 1 : 0, view: changed ? [state.view.width, Math.round(state.view.height), +state.view.scale.toFixed(3)] : null });
         if (changed) { apply(); sendHelper({ t: 'resize' }); measure(); }
       }
     }
@@ -288,6 +288,12 @@
         try {
           var h = H.openDeck(deck, W, Hh, opts);
           var s = await h.settle(opts.max || 10000);
+          // Como haría el observador de tamaño: una medida más, por si algo cambió tarde.
+          await H.sleep(opts.late === undefined ? 600 : opts.late);
+          h.remeasure();
+          await H.sleep(120);
+          var s2 = await h.settle(6000);
+          s.ms2 = s2.ms; s.ok = s.ok && s2.ok;
           var chk = await h.check();
           var st = h.state;
           job.results[deck.label] = { settle: s, view: [st.view.width, Math.round(st.view.height), +st.view.scale.toFixed(3)], model: st.model, scrolls: st.scrolls, gaveUp: st.gaveUp, needed: st.needed, log: h.log.slice(0, 12), check: chk, progress: h.progress, errors: h.errors.slice(0, 3) };

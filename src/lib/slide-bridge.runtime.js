@@ -836,7 +836,8 @@ export function slideBridgeRuntime() {
    *   side   margen libre a cada lado de la columna de contenido (-1: no se sabe);
    *   edge   cuánto se adentran en ese margen los controles pegados al borde;
    *   vfree  altura que queda vacía (franjas grandes sin nada dibujado);
-   *   vover  lo que el documento, o su panel principal, hay que desplazar;
+   *   vover  lo que hay que desplazar el documento para verlo entero;
+   *   vin    lo mismo para su panel principal, si se desplaza por dentro;
    *   vcut   lo que la ventana o el contenedor principal recortan por abajo.
    */
   function spareScan() {
@@ -856,6 +857,7 @@ export function slideBridgeRuntime() {
     var visited = 0;
     var aborted = false;
     var vover = 0;
+    var vin = 0;
     var vcut = 0;
     var area = vw * vh;
     var range = document.createRange();
@@ -998,7 +1000,7 @@ export function slideBridgeRuntime() {
         if (scroller && main) {
           // El panel principal (no un bloque de código ni una lista lateral).
           var inner = node.scrollHeight - node.clientHeight;
-          if (inner > 2 && inner > vover) vover = inner;
+          if (inner > 2 && inner > vin) vin = inner;
         }
         // Una caja con algo dentro: una tarjeta, la propia lámina. De lado a
         // lado es una barra o un fondo: la columna la define lo que lleva
@@ -1028,7 +1030,7 @@ export function slideBridgeRuntime() {
       if (firstUsed === -1) firstUsed = y;
       lastUsed = y;
     }
-    var out = { side: -1, edge: 0, vfree: 0, vover: Math.ceil(vover), vcut: Math.ceil(vcut) };
+    var out = { side: -1, edge: 0, vfree: 0, vover: Math.ceil(vover), vin: Math.ceil(vin), vcut: Math.ceil(vcut) };
     if (margins.length < 4) return out;
 
     // La columna es lo que ocupa la mayor parte de la altura; las barras de
@@ -1074,17 +1076,15 @@ export function slideBridgeRuntime() {
     out.edge = Math.ceil(edge);
 
     // Franjas vacías grandes: altura que la presentación no usa. Las pequeñas
-    // son la separación entre sus bloques.
-    if (vover <= 2 && vcut <= 2) {
-      var bandMin = Math.max(40, vh * 0.05);
-      var run = 0;
-      var free = 0;
-      for (y = 0; y <= rowsN; y++) {
-        if (y < rowsN && !used[y]) run += SPARE_ROW;
-        else { if (run >= bandMin) free += run - 16; run = 0; }
-      }
-      out.vfree = Math.floor(free);
+    // son la separación entre sus bloques, y de las grandes se respeta un poco.
+    var bandMin = Math.max(48, vh * 0.05);
+    var run = 0;
+    var free = 0;
+    for (y = 0; y <= rowsN; y++) {
+      if (y < rowsN && !used[y]) run += SPARE_ROW;
+      else { if (run >= bandMin) free += run - 24; run = 0; }
     }
+    out.vfree = Math.floor(free);
     return out;
   }
 
@@ -1135,8 +1135,9 @@ export function slideBridgeRuntime() {
       msg.edge = spare.edge;
       msg.vfree = spare.vfree;
       msg.vover = spare.vover;
+      msg.vin = spare.vin;
       msg.vcut = spare.vcut;
-      text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vcut;
+      text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vin + '/' + spare.vcut;
     }
     if (text === lastLayout) return;
     lastLayout = text;
@@ -1274,6 +1275,19 @@ export function slideBridgeRuntime() {
 
   // La página terminó de cargar sus recursos: la presentación ya tuvo ocasión
   // de convertir sus fórmulas y de acomodarse.
+  // Lo que cambia de tamaño después de cargar (una imagen que llega, fórmulas
+  // que se convierten tarde) cambia también lo que cabe: se vuelve a medir.
+  function watchSize() {
+    if (typeof ResizeObserver !== 'function' || !document.body) return;
+    var first = true;
+    try {
+      new ResizeObserver(function () {
+        if (first) { first = false; return; }
+        if (!layoutTimer) layoutSoon(300);
+      }).observe(document.body);
+    } catch (e) {}
+  }
+
   function loaded() {
     if (pageLoaded) return;
     pageLoaded = true;
@@ -1281,6 +1295,7 @@ export function slideBridgeRuntime() {
     // Plazo para que la presentación haga su propio repaso antes de suplirlo.
     setTimeout(function () { graceOver = true; scheduleMath(0); }, 1200);
     settleLayout();
+    watchSize();
   }
 
   function ready() {
