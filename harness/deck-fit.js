@@ -44,6 +44,7 @@ var DeckFit = (() => {
   var MAX_SCALE = 3;
   var DESIGN_WIDTH = 1280;
   var MIN_GAIN = 0.08;
+  var KEEP_GAIN = 0.02;
   var FIT_TOLERANCE = 1.03;
   var FIT_PROGRESS = 0.85;
   var GUTTER = 16;
@@ -85,7 +86,7 @@ var DeckFit = (() => {
   function forecastLimit(box, screen = null) {
     return Math.round(bestFrame(box, screen).height / (1 + MIN_GAIN));
   }
-  function targetView(model, box) {
+  function targetView(model, box, minGain = MIN_GAIN) {
     var _a, _b;
     const W = box.width;
     const H = box.height;
@@ -99,7 +100,7 @@ var DeckFit = (() => {
       width = Math.min(W, Math.max(model.col, DESIGN_WIDTH, W / MAX_SCALE, tall * W / H));
     }
     if (model.wide !== null && model.wide > width) width = Math.min(model.wide, W / MIN_SCALE);
-    if (width <= W && width > W / (1 + MIN_GAIN)) width = W;
+    if (width <= W && width > W / (1 + minGain)) width = W;
     if (width > W && width <= W + 4) width = W;
     if (width === W) return natural(box);
     width = width < W ? Math.ceil(width) : Math.min(Math.ceil(width), Math.floor(W / MIN_SCALE));
@@ -118,8 +119,8 @@ var DeckFit = (() => {
     if (spill > 2) return Math.ceil(height + spill);
     return free > 0 ? Math.floor(height - free) : null;
   }
-  function settle(state) {
-    const fitted = state.gaveUp ? natural(state.box) : targetView(state.model, state.box);
+  function settle(state, keep = false) {
+    const fitted = state.gaveUp ? natural(state.box) : targetView(state.model, state.box, keep ? KEEP_GAIN : MIN_GAIN);
     const view = state.enabled ? fitted : natural(state.box);
     return { ...state, view, fitted: fitted.scale };
   }
@@ -224,12 +225,12 @@ var DeckFit = (() => {
       const edge = typeof report.edge === "number" && report.edge > 0 ? report.edge : 0;
       model.col = grow(model.col, Math.ceil(width - 2 * side + 2 * Math.max(GUTTER, edge + EDGE_GAP)));
     }
-    let next = settle({ ...state, model, over, widened, trial, tries, scrolls, chase });
+    let next = settle({ ...state, model, over, widened, trial, tries, scrolls, chase }, zoomed);
     if (kept === null && model.col !== null && side !== null && next.view.width < state.view.width && !sameView(next.view, state.view)) {
       if (tries < MAX_TRIES && state.changes < MAX_CHANGES) {
         return { ...next, trial: { width, col: width - 2 * side }, tries: tries + 1, settled: false, changes: state.changes + 1 };
       }
-      next = settle({ ...next, model: { ...model, col: null } });
+      next = settle({ ...next, model: { ...model, col: null } }, zoomed);
     }
     if (sameView(next.view, state.view) || state.changes >= MAX_CHANGES) {
       return { ...next, view: state.view, settled: true };
