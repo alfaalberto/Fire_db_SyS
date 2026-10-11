@@ -320,6 +320,7 @@
     await H.sleep(350); h.remeasure(); await H.sleep(120); await h.settle(5000);
     var slides = [];
     var changes = 0;
+    var initial = h.log.filter(function (l) { return l.view; }).length;
     var lastView = h.state.view.width;
     var guard = 0;
     while (guard++ < (opts.limit || 45)) {
@@ -342,9 +343,30 @@
       if (now === before && h.log.length === logBefore) break;
       if (now === before && before !== -1) break;
     }
-    var out = { first: first, slides: slides, changes: changes, model: h.state.model, scrolls: h.state.scrolls, z: +h.state.view.scale.toFixed(3), log: h.log.length, errors: h.errors.slice(0, 3) };
+    var out = { first: first, initial: initial, slides: slides, changes: changes, model: h.state.model, scrolls: h.state.scrolls, z: +h.state.view.scale.toFixed(3), log: h.log.length, errors: h.errors.slice(0, 3) };
     h.close();
     return out;
+  };
+
+  /** Cambia el marco (ventana normal ↔ pantalla completa) y anota cómo responde el tamaño. */
+  H.boxTest = async function (deck, sizes) {
+    var h = H.openDeck(deck, sizes[0][0], sizes[0][1], {});
+    await h.settle(9000);
+    await H.sleep(300); h.remeasure(); await H.sleep(120); await h.settle(5000);
+    var steps = [{ box: sizes[0], z: +h.state.view.scale.toFixed(3), w: h.state.view.width }];
+    for (var i = 1; i < sizes.length; i++) {
+      var before = h.log.length;
+      h.resize(sizes[i][0], sizes[i][1]);
+      var at = { z: +h.state.view.scale.toFixed(3), w: h.state.view.width };
+      await H.sleep(200);
+      await h.settle(6000);
+      var chk = await h.check();
+      var moves = h.log.slice(before).filter(function (l) { return l.view; }).length;
+      steps.push({ box: sizes[i], at: at.z, z: +h.state.view.scale.toFixed(3), w: h.state.view.width, moves: moves, over: chk.sh > chk.vh + 2 ? chk.sh - chk.vh : 0, hov: chk.sw > chk.vw + 2 ? chk.sw - chk.vw : 0, cut: chk.cutText ? chk.cutMax : 0 });
+    }
+    var model = h.state.model;
+    h.close();
+    return { steps: steps, model: model };
   };
 
   H.walkAll = async function (name, W, Hh, opts) {

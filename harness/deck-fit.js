@@ -144,7 +144,6 @@ var DeckFit = (() => {
         const stuck = { ...state, model: { ...model, wide: null }, gaveUp: true, over: 0, widened: false, trial: null, chase: null };
         return { ...settle(stuck), settled: true };
       }
-      over = excess;
       model.wide = grow(model.wide, Math.ceil(need));
     } else {
       over = 0;
@@ -200,7 +199,7 @@ var DeckFit = (() => {
     if (sameView(next.view, state.view) || state.changes >= MAX_CHANGES) {
       return { ...next, view: state.view, settled: true };
     }
-    if (need > width * FIT_TOLERANCE) next = { ...next, widened: true };
+    if (need > width * FIT_TOLERANCE && next.view.width > state.view.width) next = { ...next, widened: true, over: need - width };
     return { ...next, settled: false, changes: state.changes + 1 };
   }
   var MEMORY_KEY = "sys.tamanos";
