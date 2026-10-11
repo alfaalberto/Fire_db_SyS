@@ -41,7 +41,7 @@
     ]);
     var at = texts[0].indexOf('export function slideBridgeRuntime');
     var fn = texts[0].slice(at).replace('export function', 'function').replace(/\s+$/, '');
-    fn = fn.replace('function unsettled()', 'window.__sysSpare = spareScan; function unsettled()');
+    fn = fn.replace('function unsettled()', 'window.__sysSpare = spareScan; window.__sysGroup = findGroup; window.__sysShown = detectFromGroup; window.__sysTaller = tallerSlides; window.__sysRigid = inRigidBox; function unsettled()');
     var tail = '      out.vfree = Math.floor(free);\n    }\n    return out;';
     if (fn.indexOf(tail) !== -1) fn = fn.replace(tail, '      out.vfree = Math.floor(free);\n    }\n    window.__sysSpareLast = {items: items, marginAt: marginAt, used: used, typical: typical, first: first, last: last, reach: reach};\n    return out;');
     H.bridge = "(function(){'use strict';(" + fn + ')();})();';
@@ -444,6 +444,35 @@
     }
     var workers = [];
     for (var i = 0; i < (opts.conc || 4); i++) workers.push(work());
+    await Promise.all(workers);
+    job.running = false; job.ms = Date.now() - job.started;
+    H.unhost();
+  };
+
+  /** Abre cada presentación, espera a que quede medida y evalúa `code` dentro de ella. */
+  H.survey = async function (name, W, Hh, code, opts) {
+    opts = opts || {};
+    var job = (H.jobs[name] = { done: 0, total: 0, running: true, started: Date.now(), results: {}, errors: [] });
+    var list = (opts.which ? opts.which.map(function (l) { return H.decks.find(function (d) { return d.label === l; }); }) : H.decks).filter(function (d) { return d && H.isDoc(d.html); });
+    job.total = list.length;
+    var next = 0;
+    async function work() {
+      while (next < list.length) {
+        var deck = list[next++];
+        try {
+          var h = H.openDeck(deck, W, Hh, opts);
+          await h.settle(opts.max || 9000);
+          await H.sleep(300); h.remeasure(); await H.sleep(120); await h.settle(5000);
+          var value = await h.eval(code);
+          var last = h.log.filter(function (l) { return l.r; }).slice(-1)[0];
+          job.results[deck.label] = { value: value, r: last ? last.r : null, model: h.state.model, z: +h.state.view.scale.toFixed(3) };
+          h.close();
+        } catch (e) { job.errors.push(deck.label + ': ' + (e && e.stack || e)); }
+        job.done++;
+      }
+    }
+    var workers = [];
+    for (var i = 0; i < (opts.conc || 6); i++) workers.push(work());
     await Promise.all(workers);
     job.running = false; job.ms = Date.now() - job.started;
     H.unhost();
