@@ -41,7 +41,7 @@ var DeckFit = (() => {
   var MIN_SCALE = 0.6;
   var MAX_SCALE = 3;
   var DESIGN_WIDTH = 1280;
-  var MIN_GAIN = 0.05;
+  var MIN_GAIN = 0.08;
   var FIT_TOLERANCE = 1.03;
   var FIT_PROGRESS = 0.85;
   var GUTTER = 16;
@@ -154,7 +154,9 @@ var DeckFit = (() => {
     if (((_a = report.vown) != null ? _a : 0) > 2) model.inner = true;
     const content = (_b = report.vover) != null ? _b : 0;
     const whole = (_c = report.vdoc) != null ? _c : 0;
-    const outer = scrolls.includes(slide) ? 0 : zoomed ? Math.max(content, whole - model.slack) : content;
+    const filled = side !== null && typeof report.vfree === "number" && report.vfree <= 0;
+    const pushed = zoomed || content > 2 || filled;
+    const outer = scrolls.includes(slide) ? 0 : pushed ? Math.max(content, whole - model.slack) : content;
     const inner = model.inner ? 0 : Math.max((_d = report.vin) != null ? _d : 0, (_e = report.vcut) != null ? _e : 0);
     let spill = Math.max(outer, inner);
     if (!zoomed) {
