@@ -179,6 +179,42 @@ export const edgeArrows = doc(
 <main><div class="card" id="card"><h1 data-testid="heading">Con flechas</h1><p>Las flechas viven en el margen.</p></div></main>`,
 );
 
+/** Una franja ancha, de medidas fijas, que aparece con retraso (entrada animada). */
+export const lateBanner = doc(
+  'Tamaño · contenido que aparece después',
+  `
+  body{min-height:100vh;overflow-x:hidden}
+  main{max-width:1100px;margin:40px auto 0}
+  .card{background:#1e293b;border:1px solid #475569;border-radius:16px;padding:40px;height:380px}
+  #banner{width:1440px;margin:24px 0 0 calc(50% - 720px);background:#334155;border-radius:12px;padding:20px;animation:appear .3s 3.6s both}
+  @keyframes appear{from{opacity:0}to{opacity:1}}
+`,
+  `<main><div class="card"><h1 data-testid="heading">Con retraso</h1><p>La franja de abajo tarda en aparecer.</p></div></main>
+<div id="banner">Una tabla ancha que entra al final</div>`,
+);
+
+/** Una lámina que se acomoda sola al alto de la ventana: la llena siempre. */
+export const selfFitting = doc(
+  'Tamaño · se acomoda a la ventana',
+  `
+  body{height:100vh;overflow:hidden;display:flex;flex-direction:column}
+  header{flex:none;height:60px;display:flex;align-items:center;padding:0 22px;background:#111827}
+  #fit{height:calc(100vh - 84px);aspect-ratio:4/3;margin:12px auto;background:#1e293b;border:1px solid #475569;border-radius:16px;padding:32px;overflow:hidden}
+`,
+  `<header><strong>Laboratorio</strong></header>
+<div id="fit"><h1 data-testid="heading">A la medida</h1><p>Esta lámina ocupa siempre todo el alto de la ventana.</p></div>`,
+);
+
+/** Una lámina 16:9 cuyo ancho sigue al de la ventana: su tamaño ya lo decide ella. */
+export const fluidStage = doc(
+  'Tamaño · lámina que crece con la ventana',
+  `
+  body{min-height:100vh}
+  #wide{width:84%;aspect-ratio:16/9;margin:24px auto 0;background:#1e293b;border:1px solid #475569;border-radius:16px;padding:32px;overflow:hidden}
+`,
+  `<div id="wide"><h1 data-testid="heading">Con la ventana</h1><p>Mide siempre el 84 % del ancho de la ventana.</p></div>`,
+);
+
 export const sizeCourse: SeedChapter[] = [
   {
     id: 'tam',
@@ -188,6 +224,8 @@ export const sizeCourse: SeedChapter[] = [
       { id: 'tam-columna', title: '1.2 Columna', decks: [flowCards, edgeArrows] },
       { id: 'tam-natural', title: '1.3 A su tamaño', decks: [fluidMargins, fullWidth, longPage] },
       { id: 'tam-panel', title: '1.4 Panel', decks: [viewportPanel] },
+      { id: 'tam-tarde', title: '1.5 Con retraso', decks: [lateBanner] },
+      { id: 'tam-sola', title: '1.6 Se acomoda sola', decks: [selfFitting, fluidStage] },
     ],
   },
 ];

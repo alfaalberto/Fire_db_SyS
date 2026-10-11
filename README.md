@@ -118,15 +118,19 @@ el marco que le deja la plataforma. El puente mide y `src/lib/deck-fit.ts` decid
 - **Queda pequeña** (una columna de 1200 px o una lámina 16:9 de medidas fijas en
   una pantalla de 1920): se amplía hasta aprovechar el marco. Solo consume el
   espacio que la presentación deja vacío: nunca hace que algo deje de caber ni
-  obliga a desplazarse donde antes no hacía falta. Cuenta con su lámina más alta,
-  así que el tamaño es el mismo en todas, y se recalcula al instante al cambiar la
-  ventana o al entrar en modo presentación, sin recargar nada.
+  obliga a desplazarse donde antes no hacía falta. Cuenta con su lámina más alta
+  —el puente la pone un instante en el lugar de la visible, sin que llegue a
+  pintarse, y la mide igual—, así que el tamaño es el mismo en todas, y se
+  recalcula al instante al cambiar la ventana o al entrar en modo presentación,
+  sin recargar nada.
 
 No se amplían las que ya ocupan la pantalla, las que se leen desplazándolas ni
-aquellas cuyos márgenes dependen de la ventana (un `80vw`): en esas no hay nada
-que aprovechar. Tampoco en marcos de menos de unos 1350 px de ancho, porque a una
-presentación nunca se le da una ventana menor de 1280 px, la de un portátil; por
-debajo cambiaría a su disposición de tableta.
+las que se acomodan a la ventana por su cuenta —márgenes que dependen de ella
+(un `80vw`), una lámina que se escala para llenarla—: en esas no hay nada que
+aprovechar. Tampoco cuando la ganancia sería menor del 8 %, que apenas se nota,
+ni en marcos de menos de unos 1380 px de ancho, porque a una presentación nunca
+se le da una ventana menor de 1280 px, la de un portátil; por debajo cambiaría a
+su disposición de tableta.
 
 Lo aprendido de cada presentación se recuerda en el navegador durante tres
 semanas (`sys.tamanos` en `localStorage`), para que la siguiente vez aparezca ya

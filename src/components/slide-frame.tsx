@@ -5,6 +5,8 @@ import {
   canZoom,
   createFit,
   enableFit,
+  forecastLimit,
+  forecastNeed,
   forgetModel,
   recallModel,
   rememberModel,
@@ -78,6 +80,12 @@ const SANDBOX =
 /** Si la primera medida tarda más que esto, la presentación se muestra ya. */
 const REVEAL_TIMEOUT = 900;
 
+/** El marco más grande que cabe esperar: la pantalla completa. */
+function screenBox(): { width: number; height: number } | null {
+  if (typeof window === 'undefined' || !window.screen) return null;
+  return { width: window.screen.width, height: window.screen.height };
+}
+
 function newToken(): string {
   const bytes = new Uint8Array(12);
   crypto.getRandomValues(bytes);
@@ -131,6 +139,8 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
   if (!fitRef.current) fitRef.current = createFit({ width: 0, height: 0 }, fit, null);
   const [view, setView] = useState({ width: 0, scale: 1 });
   const [fitted, setFitted] = useState(1);
+  // Lo último que se le dijo al puente sobre medir las láminas ocultas.
+  const aheadRef = useRef<0 | 1 | 2>(0);
   const memoRef = useRef({ key: memoKey, saved: null as DeckModel | null, timer: null as ReturnType<typeof setTimeout> | null });
   memoRef.current.key = memoKey;
 
@@ -171,8 +181,12 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
   const measure = useCallback(() => {
     const state = fitRef.current;
     if (!state || !readyRef.current) return;
-    // (El espacio libre se mide aunque el ajuste esté desactivado: así se sabe si hay algo que ofrecer.)
-    send({ t: 'measure', spare: canZoom(state.box), width: Math.round(state.view.width) });
+    // (El espacio libre se mide aunque el ajuste esté desactivado: así se sabe
+    // si hay algo que ofrecer. Las láminas que no están a la vista, solo
+    // cuando esa medida puede cambiar el tamaño.)
+    const screen = screenBox();
+    aheadRef.current = forecastNeed(state, screen);
+    send({ t: 'measure', spare: canZoom(state.box), width: Math.round(state.view.width), ahead: aheadRef.current, limit: forecastLimit(state.box, screen) });
   }, [send]);
 
   /** Adopta un nuevo estado del ajuste y refleja en pantalla lo que cambió. */
@@ -182,6 +196,12 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
     setView((current) => (current.width === next.view.width && current.scale === next.view.scale ? current : { width: next.view.width, scale: next.view.scale }));
     setFitted(next.fitted);
     if (next.settled) setRevealed(true);
+    // Lo aprendido puede cambiar si hace falta o no medir las láminas ocultas.
+    const ahead = forecastNeed(next, screenBox());
+    if (ahead !== aheadRef.current && readyRef.current) {
+      aheadRef.current = ahead;
+      send({ t: 'ahead', ahead });
+    }
     // Lo aprendido se guarda para la próxima visita (sin escribir a cada paso).
     const memo = memoRef.current;
     if (memo.key && before && !sameModel(before.model, next.model)) {
@@ -195,7 +215,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
         }
       }, 600);
     }
-  }, []);
+  }, [send]);
 
   useEffect(() => {
     setLoaded(false);

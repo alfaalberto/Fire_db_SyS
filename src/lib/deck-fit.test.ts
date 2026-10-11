@@ -5,6 +5,8 @@ import {
   canZoom,
   createFit,
   enableFit,
+  forecastLimit,
+  forecastNeed,
   forgetModel,
   recallModel,
   rememberModel,
@@ -16,6 +18,7 @@ import {
   type FitBox,
   type FitState,
   type LayoutReport,
+  type SlideMeasure,
 } from './deck-fit';
 
 /** Una presentación simulada: qué mediría el puente con una ventana dada. */
@@ -35,6 +38,11 @@ function capped(column: number, content: number, extra: Partial<LayoutReport> = 
     vover: Math.max(0, content - height),
     ...extra,
   });
+}
+
+/** Lo que mediría el puente de una lámina con `content` px de contenido. */
+function measure(content: number, height: number): SlideMeasure {
+  return { vfree: Math.max(0, height - content), vover: Math.max(0, content - height), vdoc: Math.max(0, content - height), vin: 0, vown: 0, vcut: 0 };
 }
 
 /** Aplica las medidas de `deck` hasta que el tamaño queda confirmado. */
@@ -102,6 +110,16 @@ describe('lo que no cabe a lo ancho', () => {
     expect(state.view.scale).toBe(1);
     expect(state.fitted).toBe(1);
     expect(state.model.wide).toBeNull();
+  });
+
+  it('en el tope de reducción, una medida repetida no la da por perdida', () => {
+    // Necesita 558 px; ya ensanchada resulta necesitar 671, más de lo que se puede reducir.
+    const deck: Deck = (width) => ({ need: width < 500 ? 558 : 671 });
+    const first = fit(deck, { width: 390, height: 760 });
+    expect(first.state.view.width).toBe(650);
+    const again = run(deck, { ...first.state, settled: false });
+    expect(again.state.gaveUp).toBe(false);
+    expect(again.state.view.width).toBe(650);
   });
 
   it('con el ajuste desactivado se ofrece pero no se aplica', () => {
@@ -231,9 +249,46 @@ describe('ampliar no hace que nada deje de caber', () => {
   });
 
   it('cuenta la lámina más alta, aunque no esté a la vista', () => {
-    const { state } = fit(capped(1200, 500, { vmore: 300 }), SCREEN);
-    expect(state.model.tall).toBe(800);
+    const deck: Deck = (width, height) => ({ ...capped(1200, 500)(width, height), tallest: measure(800, height) });
+    const { state } = fit(deck, SCREEN);
+    // Lo que ocupa la que se ve es un hecho; lo de la más alta, una previsión.
+    expect(state.model.tall).toBe(500);
+    expect(state.model.ahead).toBe(800);
     expect(state.view.height).toBeGreaterThanOrEqual(800);
+  });
+
+  it('una previsión no se acumula: vale la de la última medida a tamaño natural', () => {
+    // Dos láminas en un marco donde no cabe ampliar; cada una prevé un alto
+    // algo distinto para la más alta de las demás.
+    let content = 800;
+    let other = 860;
+    const deck: Deck = (width, height) => ({ ...capped(1200, content)(width, height), tallest: measure(other, height), slide: content === 800 ? 0 : 1 });
+    const first = fit(deck, { width: 1616, height: 864 });
+    expect(first.state.model.ahead).toBe(860);
+    content = 830;
+    other = 840;
+    const second = run(deck, { ...first.state, settled: false });
+    expect(second.state.model.tall).toBe(830);
+    expect(second.state.model.ahead).toBe(840);
+    // A pantalla completa manda el mayor de los dos, no la previsión más alta que hubo.
+    expect(resizeFit(second.state, SCREEN).view.width).toBe(Math.ceil((840 * 1920) / 1080));
+  });
+
+  it('una previsión equivocada no deja la presentación sin ampliar: la siguiente medida la corrige', () => {
+    // Una lámina de medidas fijas: al principio parece que otra pide 199 px más.
+    let other: number | null = 1090;
+    const deck: Deck = (width, height) => ({ ...capped(1280, 891)(width, height), tallest: other === null ? null : measure(other, height), slide: 0 });
+    const normal = fit(deck, { width: 1616, height: 900 });
+    expect(normal.state.model.tall).toBe(891);
+    expect(normal.state.model.ahead).toBe(1090);
+    // Con esa previsión, a pantalla completa no cabría ampliada…
+    const entering = resizeFit(normal.state, SCREEN);
+    expect(entering.view.scale).toBe(1);
+    // …pero con otro alto de ventana se ve que su lámina no crece, y se amplía.
+    other = null;
+    const full = run(deck, entering);
+    expect(full.views).toEqual([1920, 1584]);
+    expect(full.state.model.ahead).toBeNull();
   });
 
   it('una lámina más alta rebaja la ampliación de toda la presentación', () => {
@@ -249,6 +304,21 @@ describe('ampliar no hace que nada deje de caber', () => {
     const third = run(deck, { ...second.state, settled: false });
     expect(third.state.view.width).toBe(second.state.view.width);
     expect(third.changes).toBe(0);
+  });
+
+  it('ya ampliada, si hay que rebajar por debajo del mínimo se rebaja, no se quita de golpe', () => {
+    // La primera lámina ocupa 900 px; la segunda resulta pedir 1040.
+    let content = 900;
+    const deck: Deck = (width, height) => ({ ...capped(1200, content)(width, height), slide: content === 900 ? 0 : 1 });
+    const first = fit(deck, SCREEN);
+    expect(first.state.view.scale).toBeCloseTo(1.2, 2);
+    content = 1040;
+    const second = run(deck, { ...first.state, settled: false });
+    // Un 4 % no llegaría al mínimo para empezar a ampliar, pero es lo que queda.
+    expect(second.state.view.height).toBeGreaterThanOrEqual(1040);
+    expect(second.state.view.scale).toBeCloseTo(1080 / 1040, 2);
+    // Otra visita, con eso ya sabido, parte de su tamaño natural.
+    expect(createFit(SCREEN, true, second.state.model).view.scale).toBe(1);
   });
 
   it('un panel que se desplaza por dentro, si depende de la ventana, también cuenta', () => {
@@ -299,6 +369,75 @@ describe('ampliar no hace que nada deje de caber', () => {
     const again = reportFit({ ...state, view: { ...state.view } }, { ...report, width: state.view.width, height: state.view.height, vover: 0 });
     expect(again.model.tall).toBe(760);
     expect(again.scrolls).toEqual([]);
+  });
+
+  it('un documento más alto que la ventana, pero sin nada ahí abajo, no impide ampliar', () => {
+    // `min-height:100vh` más un margen: siempre mide 40 px de más, vacíos.
+    const deck: Deck = (width, height) => ({ ...capped(1200, 600)(width, height), vover: 0, vdoc: 40 });
+    const { state, views } = fit(deck, SCREEN);
+    // Se comprueba una vez que darle más alto no lo quita, y se recuerda.
+    expect(views).toEqual([1920, 1280, 1352, 1280]);
+    expect(state.model.slack).toBe(40);
+    expect(state.view.width).toBe(DESIGN_WIDTH);
+    expect(run(deck, createFit(SCREEN, true, state.model)).changes).toBe(0);
+  });
+
+  it('deshacer un alto concedido en vano no se toma por una ampliación fallida', () => {
+    // Columna fija de 1298 px y 902 de contenido; el documento mide siempre 24 px más.
+    const deck: Deck = (width, height) => ({ need: width, side: Math.floor((width - 1298) / 2), vfree: 0, vover: Math.max(0, 902 - height), vdoc: Math.max(0, 902 - height) + 24, slide: 0 });
+    // En la ventana normal no cabe a lo alto: se queda a su tamaño.
+    const normal = fit(deck, { width: 1616, height: 864 });
+    expect(normal.state.view.scale).toBe(1);
+    // A pantalla completa sí. Se comprueba que esos 24 px no dependen de la ventana…
+    const full = run(deck, resizeFit(normal.state, SCREEN));
+    expect(full.views).toEqual([1647, 1691, 1647]);
+    expect(full.state.model.slack).toBe(24);
+    // …y el paso de vuelta, aunque pequeño, no la marca como de margen relativo.
+    expect(full.state.model.fluid).toBeNull();
+    expect(full.state.model.col).toBe(1331);
+  });
+
+  it('si el contenido llega al pie de la ventana, el alto de más del documento es suyo y se cuenta', () => {
+    // Una lámina de 891 px de alto: 868 de contenido y 23 de relleno por debajo.
+    const padded: Deck = (width, height) => ({ need: width, side: Math.floor((width - 1296) / 2), vfree: 0, vover: Math.max(0, 868 - height), vdoc: Math.max(0, 891 - height), slide: 0 });
+    const normal = fit(padded, { width: 1616, height: 864 });
+    expect(normal.state.view.scale).toBe(1);
+    expect(normal.state.model.tall).toBe(891);
+    // Al pasar a pantalla completa acierta a la primera, sin corregir después.
+    const full = run(padded, resizeFit(normal.state, SCREEN));
+    expect(full.changes).toBe(0);
+    expect(full.state.view.width).toBe(Math.ceil((891 * 1920) / 1080));
+
+    // Lo mismo si el contenido acaba justo en el pie y solo sobra el relleno.
+    const flush: Deck = (width, height) => ({ need: width, side: Math.floor((width - 1158) / 2), vfree: 0, vover: 0, vdoc: Math.max(0, 916 - height), slide: 0 });
+    const tight = fit(flush, { width: 1616, height: 864 });
+    expect(tight.state.model.tall).toBe(916);
+    expect(run(flush, resizeFit(tight.state, SCREEN)).changes).toBe(0);
+  });
+
+  it('pero si ese alto de más aparece al ampliar, cuenta: asomaría una barra de desplazamiento', () => {
+    // Cabe justo a tamaño natural; ampliada, al documento le sobran 9 px vacíos.
+    const deck: Deck = (width, height) => ({ need: width, side: Math.floor((width - 1280) / 2), vfree: Math.max(0, height - 882), vover: 0, vdoc: Math.max(0, 891 - height) });
+    const { state } = fit(deck, SCREEN);
+    expect(state.model.slack).toBe(0);
+    expect(state.model.tall).toBe(891);
+    expect(state.view.height).toBeGreaterThanOrEqual(891);
+  });
+
+  it('el mismo desborde medido por dentro y por fuera se resuelve con una sola prueba', () => {
+    // Un cuerpo que se desplaza dentro del documento: sobran unos 98 px con cualquier ventana.
+    const deck: Deck = (width, height) => {
+      const over = height > 1000 ? 92 : 98;
+      return { need: width, side: Math.floor((width - 1390) / 2), vfree: 0, vover: 0, vdoc: over, vin: over, slide: 0 };
+    };
+    const model: DeckModel = { ...EMPTY_MODEL, col: 1422, tall: 935 };
+    const { state, views } = run(deck, createFit(SCREEN, true, model));
+    // Se le da más alto una vez, no sirve, y se vuelve: nada más.
+    expect(views).toHaveLength(3);
+    expect(views[2]).toBe(views[0]);
+    expect(state.model.inner).toBe(true);
+    expect(state.model.slack).toBe(98);
+    expect(state.model.tall).toBe(935);
   });
 
   it('un desborde que no depende de la ventana deja de perseguirse', () => {
@@ -354,6 +493,116 @@ describe('lo aprendido', () => {
   });
 });
 
+describe('las que llenan la ventana justa', () => {
+  const NORMAL: FitBox = { width: 1616, height: 864 };
+
+  it('si se acomodan a la ventana que les den, se dejan como están en cualquier marco', () => {
+    // Una lámina 16:9 que se ajusta al alto de la ventana (menos una barra de 99 px).
+    const fitting: Deck = (width, height) => {
+      const stage = Math.min(width, Math.floor(((height - 99) * 16) / 9));
+      return { need: width, side: Math.floor((width - stage) / 2), vfree: 0, vover: 0, vdoc: 0 };
+    };
+    const normal = fit(fitting, NORMAL);
+    expect(normal.state.view.scale).toBe(1);
+    expect(normal.state.model.col).not.toBeNull();
+    expect(normal.state.model.tall).toBeNull();
+    expect(normal.state.model.fills).toBe(864);
+    // A pantalla completa no se da por hecho que mida 864: se mira, y la llena.
+    const full = run(fitting, resizeFit(normal.state, SCREEN));
+    expect(full.changes).toBe(0);
+    expect(full.state.view.scale).toBe(1);
+    expect(full.state.model.fills).toBe(1080);
+    // Y de vuelta a la ventana normal, igual.
+    expect(resizeFit(full.state, NORMAL).view.scale).toBe(1);
+  });
+
+  it('si su contenido medía justo eso, se amplían en cuanto se ve en un marco más alto', () => {
+    // 850 px de contenido: en 864 no deja una franja que cuente; en 1080 sí.
+    const snug: Deck = (width, height) => ({ need: width, side: Math.floor((width - 1200) / 2), vfree: height - 850 >= 48 ? height - 850 - 24 : 0, vover: 0, vdoc: 0 });
+    const normal = fit(snug, NORMAL);
+    expect(normal.state.model.fills).toBe(864);
+    const full = run(snug, resizeFit(normal.state, SCREEN));
+    expect(full.views).toEqual([1920, Math.ceil((874 * 1920) / 1080)]);
+    // La siguiente vez ya se sabe lo que ocupa: el ajuste es inmediato.
+    const again = resizeFit(resizeFit(full.state, NORMAL), SCREEN);
+    expect(again.view.width).toBe(full.state.view.width);
+  });
+
+  it('una de medidas fijas que la llena justa sí se da por medida: mide eso', () => {
+    // Una lámina fija que pide 891 px, vista en una ventana de 900.
+    const fixed: Deck = (width, height) => ({ need: width, side: Math.floor((width - 1280) / 2), vfree: height - 891 >= 48 ? height - 891 - 24 : 0, vover: Math.max(0, 891 - height), vdoc: Math.max(0, 891 - height), firm: true });
+    const normal = fit(fixed, { width: 1616, height: 900 });
+    expect(normal.state.view.scale).toBe(1);
+    expect(normal.state.model.tall).toBe(900);
+    expect(normal.state.model.fills).toBeNull();
+    // A pantalla completa el ajuste es inmediato y ya no cambia.
+    const full = run(fixed, resizeFit(normal.state, SCREEN));
+    expect(full.views).toEqual([1600]);
+  });
+
+  it('con otra lámina ya medida, la que llenaba la ventana cuenta por lo que llenó', () => {
+    let content = 850;
+    const deck: Deck = (width, height) => ({ need: width, side: Math.floor((width - 1200) / 2), vfree: height - content >= 48 ? height - content - 24 : 0, vover: 0, vdoc: 0, slide: content === 850 ? 0 : 1 });
+    const first = fit(deck, NORMAL);
+    expect(first.state.model.fills).toBe(864);
+    // Otra lámina, más corta, sí deja ver lo que ocupa; aquí sigue sin haber qué ampliar.
+    content = 700;
+    const second = run(deck, { ...first.state, settled: false });
+    expect(second.state.model.tall).toBe(724);
+    expect(second.state.view.scale).toBe(1);
+    // A pantalla completa se cuenta con la primera: 864 px, no los 724 de la segunda.
+    expect(resizeFit(second.state, SCREEN).view.width).toBe(1536);
+  });
+});
+
+describe('medir las láminas que no están a la vista', () => {
+  const NORMAL: FitBox = { width: 1616, height: 864 };
+
+  it('solo se pide a tamaño natural y donde ampliar es posible', () => {
+    // Sin saber aún nada de ella: solo si la lámina a la vista deja margen.
+    expect(forecastNeed(createFit(SCREEN, true))).toBe(1);
+    // En un marco sin sitio para ampliar no sirve de nada.
+    expect(forecastNeed(createFit(LAPTOP, true), SCREEN)).toBe(0);
+    // Ya ampliada, tampoco: ahí manda lo que se ve.
+    const zoomed = fit(capped(1200, 600), SCREEN).state;
+    expect(zoomed.view.scale).toBeGreaterThan(1);
+    expect(forecastNeed(zoomed, SCREEN)).toBe(0);
+  });
+
+  it('se pide aunque aquí no quepa ampliar, si cabrá a pantalla completa', () => {
+    // 850 px de contenido: en la ventana normal no hay sitio, a pantalla completa sí.
+    const state = fit(capped(1200, 850), NORMAL).state;
+    expect(state.view.scale).toBe(1);
+    expect(forecastNeed(state, SCREEN)).toBe(2);
+    expect(forecastNeed(state)).toBe(0);
+    // Si ni a pantalla completa cabría, no hace falta.
+    const long = fit(capped(1200, 1400), NORMAL).state;
+    expect(forecastNeed(long, SCREEN)).toBe(0);
+  });
+
+  it('y deja de hacer falta cuando la lámina a la vista ya no cabría ampliada en ningún marco', () => {
+    // En una pantalla de 1080 px de alto, por encima de 1000 no queda ganancia que compense.
+    expect(forecastLimit(NORMAL, SCREEN)).toBe(1000);
+    expect(forecastLimit(SCREEN, SCREEN)).toBe(1000);
+    expect(forecastLimit(NORMAL)).toBe(800);
+  });
+
+  it('si el puente no la midió, la previsión que había se conserva', () => {
+    let content = 700;
+    let other: SlideMeasure | null | undefined;
+    const deck: Deck = (width, height) => ({ ...capped(1200, content)(width, height), ...(other === undefined ? {} : { tallest: other }) });
+    other = measure(840, 864);
+    const first = fit(deck, NORMAL);
+    expect(first.state.model.ahead).toBe(840);
+    content = 720;
+    other = undefined;
+    expect(run(deck, { ...first.state, settled: false }).state.model.ahead).toBe(840);
+    // Medida y sin ninguna más alta: ya no hay nada que prever.
+    other = null;
+    expect(run(deck, { ...first.state, settled: false }).state.model.ahead).toBeNull();
+  });
+});
+
 describe('memoria entre visitas', () => {
   let store: Record<string, string>;
 
@@ -372,7 +621,7 @@ describe('memoria entre visitas', () => {
   });
 
   it('guarda y recupera lo aprendido', () => {
-    const model: DeckModel = { col: 1232, wide: null, tall: 822, fluid: null, inner: true };
+    const model: DeckModel = { col: 1232, wide: null, tall: 822, ahead: 846, fills: 864, fluid: null, inner: true, slack: 40 };
     rememberModel('a', model);
     expect(recallModel('a')).toEqual(model);
     expect(recallModel('b')).toBeNull();
@@ -416,7 +665,7 @@ describe('memoria entre visitas', () => {
     expect(recallModel('a')).toBeNull();
     store['sys.tamanos'] = JSON.stringify({ a: 'x', b: [1300, 'y', -4, 0, 1, today], c: [1300, 0, 0, 0, 0] });
     expect(recallModel('a')).toBeNull();
-    expect(recallModel('b')).toEqual({ col: 1300, wide: null, tall: null, fluid: null, inner: true });
+    expect(recallModel('b')).toEqual({ col: 1300, wide: null, tall: null, ahead: null, fills: null, fluid: null, inner: true, slack: 0 });
     // Sin fecha no se sabe de cuándo es: no se usa.
     expect(recallModel('c')).toBeNull();
     vi.stubGlobal('localStorage', undefined);

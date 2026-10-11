@@ -116,6 +116,21 @@ test.describe('presentaciones que quedan pequeñas en una pantalla grande', () =
     expect(await scaleOf(page)).toBeGreaterThan(1.05);
   });
 
+  test('lo que aparece más tarde también se mide, y la ampliación se rebaja para que quepa', async ({ page }) => {
+    await openApp(page, sizes(), '#/t/tam-tarde/1');
+    await expectHeading(page, 'Con retraso');
+    // Al principio solo se ve la tarjeta de 1100 px.
+    await zoomed(page, 1.2);
+    // Al terminar su entrada, la franja de 1440 px tiene que caber.
+    await expect.poll(() => scaleOf(page), { timeout: 12_000 }).toBeLessThan(1.15);
+    await page.waitForTimeout(500);
+    expect(await scaleOf(page)).toBeGreaterThan(1.09);
+    const box = await frameBox(page);
+    const banner = (await deck(page).locator('#banner').boundingBox())!;
+    expect(banner.x).toBeGreaterThanOrEqual(box.x - 1);
+    expect(banner.x + banner.width).toBeLessThanOrEqual(box.x + box.width + 1);
+  });
+
   test('un panel que se desplaza por diseño no impide ampliar', async ({ page }) => {
     await openApp(page, sizes(), '#/t/tam-fija/2');
     await expectHeading(page, 'Con panel');
@@ -156,6 +171,28 @@ test.describe('presentaciones que quedan pequeñas en una pantalla grande', () =
     // Una página larga se lee desplazándola: ampliarla solo lo alargaría.
     await page.goto('/#/t/tam-natural/3');
     await expectHeading(page, 'Página larga');
+    await page.waitForTimeout(1800);
+    await expect(frame(page)).toHaveCSS('transform', 'none');
+  });
+
+  test('la que se acomoda sola a la ventana no se amplía, tampoco al agrandarla', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 900 });
+    await openApp(page, sizes(), '#/t/tam-sola/1');
+    await expectHeading(page, 'A la medida');
+    await page.waitForTimeout(1800);
+    await expect(frame(page)).toHaveCSS('transform', 'none');
+    // Una ventana bastante más alta: llenó la anterior, pero eso no dice que
+    // mida eso. Se ve a su tamaño, vuelve a llenarla y así se queda.
+    await page.setViewportSize({ width: 1920, height: 1200 });
+    await page.waitForTimeout(1500);
+    await expect(frame(page)).toHaveCSS('transform', 'none');
+    const box = await frameBox(page);
+    const fit = (await deck(page).locator('#fit').boundingBox())!;
+    expect(fit.height).toBeGreaterThan(box.height - 100);
+
+    // Y la que crece con el ancho de la ventana, igual: ya la aprovecha ella.
+    await page.goto('/#/t/tam-sola/2');
+    await expectHeading(page, 'Con la ventana');
     await page.waitForTimeout(1800);
     await expect(frame(page)).toHaveCSS('transform', 'none');
   });
