@@ -309,6 +309,67 @@
     if (!opts.keep) H.unhost();
   };
 
+  /**
+   * Recorre las láminas de una presentación con su propia navegación (la que
+   * usa el modo presentación) y anota, en cada una, el tamaño y si algo no cabe.
+   */
+  H.walk = async function (deck, W, Hh, opts) {
+    opts = opts || {};
+    var h = H.openDeck(deck, W, Hh, Object.assign({ presenting: true }, opts));
+    var first = await h.settle(opts.max || 9000);
+    await H.sleep(350); h.remeasure(); await H.sleep(120); await h.settle(5000);
+    var slides = [];
+    var changes = 0;
+    var lastView = h.state.view.width;
+    var guard = 0;
+    while (guard++ < (opts.limit || 45)) {
+      var chk = await h.check();
+      var st = h.state;
+      var last = h.log.length ? h.log[h.log.length - 1] : null;
+      var p = h.progress;
+      slides.push({ i: p ? p.index : -1, n: p ? p.total : 0, z: +st.view.scale.toFixed(3), w: st.view.width, over: chk.sh > chk.vh + 2 ? chk.sh - chk.vh : 0, hov: chk.sw > chk.vw + 2 ? chk.sw - chk.vw : 0, cut: chk.cutText ? chk.cutMax : 0, scr: (chk.scrollers || []).filter(function (x) { return x.a >= 0.2; }).map(function (x) { return x.over; }).join('/'), r: last && last.r ? last.r.slice(3) : null, box: chk.box ? [Math.round((chk.box.x[1] - chk.box.x[0]) / chk.vw * 100), Math.round((Math.min(chk.box.y[1], chk.vh) - Math.max(chk.box.y[0], 0)) / chk.vh * 100)] : null });
+      var edgesBefore = h.edges;
+      var before = p ? p.index : -1;
+      var logBefore = h.log.length;
+      h.nav(1);
+      // El puente mide 560 ms después de avanzar; se espera a esa medida.
+      var t = performance.now();
+      while (performance.now() - t < 2600 && h.log.length === logBefore && h.edges === edgesBefore) await H.sleep(60);
+      if (h.edges !== edgesBefore) break;
+      await h.settle(5000, 500);
+      var now = h.progress ? h.progress.index : -1;
+      if (h.state.view.width !== lastView) { changes++; lastView = h.state.view.width; }
+      if (now === before && h.log.length === logBefore) break;
+      if (now === before && before !== -1) break;
+    }
+    var out = { first: first, slides: slides, changes: changes, model: h.state.model, scrolls: h.state.scrolls, z: +h.state.view.scale.toFixed(3), log: h.log.length, errors: h.errors.slice(0, 3) };
+    h.close();
+    return out;
+  };
+
+  H.walkAll = async function (name, W, Hh, opts) {
+    opts = opts || {};
+    var job = (H.jobs[name] = { done: 0, total: 0, running: true, started: Date.now(), results: {}, errors: [] });
+    var list = (opts.which ? opts.which.map(function (l) { return H.decks.find(function (d) { return d.label === l; }); }) : H.decks).filter(function (d) { return d && H.isDoc(d.html); });
+    job.total = list.length;
+    var next = 0;
+    async function work() {
+      while (next < list.length) {
+        var deck = list[next++];
+        try {
+          var model = opts.models ? opts.models[deck.label] || null : null;
+          job.results[deck.label] = await H.walk(deck, W, Hh, Object.assign({}, opts, { model: model }));
+        } catch (e) { job.errors.push(deck.label + ': ' + (e && e.stack || e)); }
+        job.done++;
+      }
+    }
+    var workers = [];
+    for (var i = 0; i < (opts.conc || 4); i++) workers.push(work());
+    await Promise.all(workers);
+    job.running = false; job.ms = Date.now() - job.started;
+    H.unhost();
+  };
+
   H.wait = async function (name, ms) {
     var j = H.jobs[name];
     var t = performance.now();

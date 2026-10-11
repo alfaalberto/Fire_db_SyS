@@ -92,7 +92,7 @@ var DeckFit = (() => {
   function settle(state) {
     const fitted = state.gaveUp ? natural(state.box) : targetView(state.model, state.box);
     const view = state.enabled ? fitted : natural(state.box);
-    return { ...state, view, needed: fitted.scale !== 1 };
+    return { ...state, view, fitted: fitted.scale };
   }
   var FRESH = { gaveUp: false, over: 0, widened: false, trial: null, tries: 0, chase: null, changes: 0, settled: false };
   function modelFor(model, box) {
@@ -100,7 +100,7 @@ var DeckFit = (() => {
     return { ...model, wide: model.wide !== null && model.wide > box.width ? null : model.wide };
   }
   function createFit(box, enabled, model = null) {
-    return settle({ ...FRESH, scrolls: [], box, enabled, model: modelFor(model, box), view: natural(box), needed: false });
+    return settle({ ...FRESH, scrolls: [], box, enabled, model: modelFor(model, box), view: natural(box), fitted: 1 });
   }
   function resizeFit(state, box) {
     if (Math.abs(box.width - state.box.width) < 1 && Math.abs(box.height - state.box.height) < 1) return state;
@@ -164,14 +164,15 @@ var DeckFit = (() => {
       chase = null;
     } else if (spill <= 2) {
       chase = null;
-    } else if (chase && chase.slide === slide && spill >= chase.spill * FIT_PROGRESS) {
+    } else if (chase && chase.slide === slide && height > chase.height + 1 && spill >= chase.spill * FIT_PROGRESS) {
       model.tall = chase.base;
       if (inner >= outer) model.inner = true;
       else scrolls = [...scrolls, slide];
       chase = null;
       spill = 0;
     } else {
-      chase = { slide, spill, base: chase && chase.slide === slide ? chase.base : state.model.tall };
+      const same = chase !== null && chase.slide === slide;
+      if (!same || height > chase.height + 1) chase = { slide, spill, height, base: same ? chase.base : state.model.tall };
       model.tall = grow(model.tall, Math.ceil(Math.min(height + spill, box.height)));
     }
     const kept = model.col;
