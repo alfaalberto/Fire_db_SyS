@@ -61,6 +61,31 @@
   function helper(token) {
     var parentWin = window.parent;
     function post(m) { m.__helper = token; try { parentWin.postMessage(m, '*'); } catch (e) {} }
+    // Con la ventana del panel oculta, el navegador da la página por no
+    // visible y frena sus temporizadores. Para el banco, la presentación se
+    // comporta como si estuviera a la vista y sus temporizadores los marca la
+    // página de fuera (que usa un reloj que no se frena).
+    try {
+      Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: function () { return false; } });
+      Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: function () { return 'visible'; } });
+    } catch (e0) {}
+    var timers = new Map();
+    var timerSeq = 0;
+    function arm(fn, ms, args, repeat) {
+      var id = ++timerSeq;
+      timers.set(id, { fn: fn, args: args, repeat: repeat ? Math.max(4, ms || 0) : 0 });
+      post({ t: 'timer', id: id, ms: Math.max(0, ms || 0) });
+      return id;
+    }
+    window.setTimeout = function (fn, ms) { return arm(fn, ms, [].slice.call(arguments, 2), false); };
+    window.setInterval = function (fn, ms) { return arm(fn, ms, [].slice.call(arguments, 2), true); };
+    window.clearTimeout = window.clearInterval = function (id) { timers.delete(id); };
+    function tick(id) {
+      var c = timers.get(id);
+      if (!c) return;
+      if (c.repeat) post({ t: 'timer', id: id, ms: c.repeat }); else timers.delete(id);
+      try { if (typeof c.fn === 'function') c.fn.apply(window, c.args); else (0, eval)(String(c.fn)); } catch (e) { setTimeout(function () { throw e; }, 0); }
+    }
     function ff() {
       try {
         var list = document.getAnimations();
@@ -159,6 +184,7 @@
     window.addEventListener('message', function (ev) {
       var d = ev.data;
       if (!d || d.__helper !== token) return;
+      if (d.t === 'tick') { tick(d.id); return; }
       if (d.t === 'resize') { ff(); window.dispatchEvent(new Event('resize')); }
       else if (d.t === 'check') { ff(); var m; try { m = check(); } catch (e) { m = { fail: String(e && e.stack || e).slice(0, 300) }; } post({ t: 'r', id: d.id, m: m }); }
       else if (d.t === 'eval') { var v; try { v = (0, eval)(d.code); } catch (e2) { v = 'ERR ' + e2; } post({ t: 'r', id: d.id, m: v }); }
@@ -226,13 +252,17 @@
     function sendHelper(msg) { msg.__helper = token; frame.contentWindow.postMessage(msg, '*'); }
     var screenBox = opts.screen === undefined ? { width: 1920, height: 1080 } : opts.screen;
     var ahead = 0;
-    function measure() { ahead = fit.forecastNeed(state, screenBox); send({ t: 'measure', spare: opts.spare !== undefined ? opts.spare : fit.canZoom(state.box), width: state.view.width, ahead: ahead }); }
+    function measure() { ahead = fit.forecastNeed(state, screenBox); send({ t: 'measure', spare: opts.spare !== undefined ? opts.spare : fit.canZoom(state.box), width: state.view.width, ahead: ahead, limit: fit.forecastLimit(state.box, screenBox) }); }
     function syncAhead() { var want = fit.forecastNeed(state, screenBox); if (want !== ahead && ready) { ahead = want; send({ t: 'ahead', ahead: want }); } }
     function onMsg(ev) {
       if (ev.source !== frame.contentWindow) return;
       var d = ev.data;
       if (!d) return;
-      if (d.__helper === token) { if (d.t === 'r') { var f = pending.get(d.id); pending.delete(d.id); if (f) f(d.m); } return; }
+      if (d.__helper === token) {
+        if (d.t === 'r') { var f = pending.get(d.id); pending.delete(d.id); if (f) f(d.m); }
+        else if (d.t === 'timer') { (function (id, ms) { H.sleep(ms).then(function () { if (frame.contentWindow) frame.contentWindow.postMessage({ __helper: token, t: 'tick', id: id }, '*'); }); })(d.id, d.ms); }
+        return;
+      }
       if (d.__sys !== token) return;
       lastMsg = performance.now();
       if (d.t === 'ready') { ready = true; send({ t: 'mode', presenting: !!opts.presenting }); measure(); }

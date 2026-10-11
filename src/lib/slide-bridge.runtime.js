@@ -3,7 +3,9 @@
  *
  * Las presentaciones son archivos HTML completos que se muestran, sin tocar, en
  * un iframe aislado (sandbox sin same-origin). Este código es lo único que la
- * app les inyecta. No cambia su aspecto ni su comportamiento; solo:
+ * app les inyecta. No cambia su aspecto ni su comportamiento (cuando para
+ * medir necesita mover algo, lo devuelve a su sitio antes de que llegue a
+ * pintarse); solo:
  *
  *  - detecta en qué lámina va la presentación (grupo de `.slide`, contador
  *    "3 / 11") y lo informa a la app;
@@ -15,8 +17,9 @@
  *    cargarían la plataforma dentro del iframe;
  *  - convierte con KaTeX las fórmulas que la presentación dejó en crudo;
  *  - avisa cuando el contenido no cabe a lo ancho, para mostrarla reducida
- *    en lugar de recortada, y cuánto espacio deja libre, para ampliarla
- *    cuando en una pantalla grande queda pequeña;
+ *    en lugar de recortada, y cuánto espacio deja libre —la lámina a la vista
+ *    y la más alta de las demás—, para ampliarla cuando en una pantalla
+ *    grande queda pequeña;
  *  - reenvía Escape, los archivos soltados y los errores de ejecución.
  *
  * IMPORTANTE: esta función se convierte a texto con `toString()` y se ejecuta
@@ -804,6 +807,9 @@ export function slideBridgeRuntime() {
   // Si a la app le sirve además la medida de las láminas que no están a la
   // vista: 0 no; 1 solo si la visible deja margen a los lados; 2 sí.
   var wantAhead = 0;
+  // Alto a partir del cual esa medida ya no sirve: si la lámina a la vista lo
+  // alcanza, la presentación no cabría ampliada en ningún marco.
+  var aheadLimit = 0;
   // Ancho con el que la app espera la próxima medida (tras cambiar el tamaño).
   var awaited = 0;
   var layoutWaits = 0;
@@ -1441,7 +1447,8 @@ export function slideBridgeRuntime() {
       // Y lo mismo para la lámina más alta de las que no están a la vista, si
       // puede servir de algo: con poco margen a los lados no hay qué ampliar
       // (mismo criterio que en `deck-fit`).
-      if (wantAhead === 2 || (wantAhead === 1 && spare.side >= Math.max(24, width * 0.05))) {
+      var worth = !(aheadLimit > 0) || height + spare.vover < aheadLimit;
+      if (worth && (wantAhead === 2 || (wantAhead === 1 && spare.side >= Math.max(24, width * 0.05)))) {
         var other = null;
         try { other = tallestSlide(height); } catch (e2) { other = null; }
         // `null`: se midió y ninguna pide más alto que la visible.
@@ -1558,6 +1565,7 @@ export function slideBridgeRuntime() {
       // `width`: el ancho que acaba de darle al marco; se mide cuando llega.
       if (typeof data.spare === 'boolean') wantSpare = data.spare;
       wantAhead = data.ahead === 2 ? 2 : data.ahead === 1 ? 1 : 0;
+      aheadLimit = typeof data.limit === 'number' && data.limit > 0 ? data.limit : 0;
       lastLayout = '';
       awaited = typeof data.width === 'number' && data.width > 0 ? data.width : 0;
       if (!pageLoaded) return;

@@ -29,6 +29,7 @@ var DeckFit = (() => {
     canZoom: () => canZoom,
     createFit: () => createFit,
     enableFit: () => enableFit,
+    forecastLimit: () => forecastLimit,
     forecastNeed: () => forecastNeed,
     forgetModel: () => forgetModel,
     recallModel: () => recallModel,
@@ -76,8 +77,13 @@ var DeckFit = (() => {
   function forecastNeed(state, screen = null) {
     if (state.gaveUp || state.view.scale !== 1 || !canZoom(state.box)) return 0;
     if (state.model.col === null) return 1;
-    const best = screen ? { width: Math.max(screen.width, state.box.width), height: Math.max(screen.height, state.box.height) } : state.box;
-    return targetView({ ...state.model, ahead: null, fills: null }, best).scale > 1 ? 2 : 0;
+    return targetView({ ...state.model, ahead: null, fills: null }, bestFrame(state.box, screen)).scale > 1 ? 2 : 0;
+  }
+  function bestFrame(box, screen) {
+    return screen ? { width: Math.max(screen.width, box.width), height: Math.max(screen.height, box.height) } : box;
+  }
+  function forecastLimit(box, screen = null) {
+    return Math.round(bestFrame(box, screen).height / (1 + MIN_GAIN));
   }
   function targetView(model, box) {
     var _a, _b;
