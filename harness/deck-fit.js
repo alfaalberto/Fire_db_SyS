@@ -90,6 +90,17 @@ var DeckFit = (() => {
     const scale = W / width;
     return { width, height: H / scale, scale };
   }
+  function needOf(measure, model, height, box) {
+    var _a, _b, _c, _d, _e, _f;
+    const free = (_a = measure.vfree) != null ? _a : 0;
+    const content = (_b = measure.vover) != null ? _b : 0;
+    const pushed = content > 2 || free <= 0;
+    const outer = pushed ? Math.max(content, ((_c = measure.vdoc) != null ? _c : 0) - model.slack) : content;
+    let inner = model.inner || ((_d = measure.vown) != null ? _d : 0) > 2 ? 0 : Math.max((_e = measure.vin) != null ? _e : 0, (_f = measure.vcut) != null ? _f : 0);
+    if (inner > 2 && free >= box.height * INNER_FREE) inner = 0;
+    const spill = Math.max(outer, inner);
+    return spill > 2 ? Math.ceil(height + spill) : Math.max(0, Math.floor(height - free));
+  }
   function settle(state) {
     const fitted = state.gaveUp ? natural(state.box) : targetView(state.model, state.box);
     const view = state.enabled ? fitted : natural(state.box);
@@ -160,7 +171,6 @@ var DeckFit = (() => {
     const outer = scrolls.includes(slide) ? 0 : pushed ? Math.max(content, whole - model.slack) : content;
     const inner = model.inner ? 0 : Math.max((_d = report.vin) != null ? _d : 0, (_e = report.vcut) != null ? _e : 0);
     let spill = Math.max(outer, inner);
-    const more = typeof report.vmore === "number" && report.vmore > 0 ? report.vmore : 0;
     if (!zoomed) {
       if (inner > 2 && ((_f = report.vfree) != null ? _f : 0) >= box.height * INNER_FREE) {
         model.inner = true;
@@ -169,8 +179,10 @@ var DeckFit = (() => {
       }
       if (spill > 2) {
         model.tall = grow(model.tall, Math.ceil(height + spill));
-        model.ahead = Math.ceil(height + spill + more);
+      } else if (side !== null && typeof report.vfree === "number") {
+        model.tall = grow(model.tall, Math.max(0, Math.floor(height - report.vfree)));
       }
+      if (side !== null) model.ahead = report.tallest ? needOf(report.tallest, model, height, box) : null;
       chase = null;
     } else if (spill <= 2) {
       chase = null;
@@ -185,11 +197,6 @@ var DeckFit = (() => {
       const same = chase !== null && chase.slide === slide;
       if (!same || height > chase.height + 1) chase = { slide, spill, height, base: same ? chase.base : state.model.tall };
       model.tall = grow(model.tall, Math.ceil(Math.min(height + spill, box.height)));
-    }
-    if (!zoomed && spill <= 2 && side !== null && typeof report.vfree === "number") {
-      const own = Math.max(0, Math.floor(height - report.vfree));
-      model.tall = grow(model.tall, own);
-      model.ahead = own + Math.ceil(more);
     }
     const kept = model.col;
     if (side !== null && side >= Math.max(MIN_MARGIN, width * MIN_MARGIN_RATIO) && !isFluid(model, side / width)) {

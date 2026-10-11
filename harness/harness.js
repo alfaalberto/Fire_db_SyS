@@ -41,9 +41,14 @@
     ]);
     var at = texts[0].indexOf('export function slideBridgeRuntime');
     var fn = texts[0].slice(at).replace('export function', 'function').replace(/\s+$/, '');
-    fn = fn.replace('function unsettled()', 'window.__sysSpare = spareScan; window.__sysGroup = findGroup; window.__sysShown = detectFromGroup; window.__sysTaller = tallerSlides; window.__sysRigid = inRigidBox; function unsettled()');
-    var tail = '      out.vfree = Math.floor(free);\n    }\n    return out;';
-    if (fn.indexOf(tail) !== -1) fn = fn.replace(tail, '      out.vfree = Math.floor(free);\n    }\n    window.__sysSpareLast = {items: items, marginAt: marginAt, used: used, typical: typical, first: first, last: last, reach: reach};\n    return out;');
+    fn = fn.replace('function unsettled()', 'window.__sysSpare = spareScan; window.__sysGroup = findGroup; window.__sysShown = detectFromGroup; window.__sysTallest = tallestSlide; window.__sysRigid = inRigidBox; window.__sysT = { scan: [], tall: [] }; function unsettled()');
+    // Cronómetro de las dos medidas (solo en el banco).
+    var a1 = 'try { spare = spareScan(); } catch (e) { spare = null; }';
+    if (fn.indexOf(a1) === -1) throw new Error('no se encontró la llamada a spareScan');
+    fn = fn.replace(a1, 'var __t0 = performance.now(); ' + a1 + ' window.__sysT.scan.push(Math.round((performance.now() - __t0) * 10) / 10);');
+    var a2 = 'try { other = tallestSlide(height); } catch (e2) { other = null; }';
+    if (fn.indexOf(a2) === -1) throw new Error('no se encontró la llamada a tallestSlide');
+    fn = fn.replace(a2, 'var __t1 = performance.now(); ' + a2 + ' window.__sysT.tall.push(Math.round((performance.now() - __t1) * 10) / 10);');
     H.bridge = "(function(){'use strict';(" + fn + ')();})();';
     (0, eval)(texts[1] + '\n;window.DeckFit = DeckFit;');
     H.fit = window.DeckFit;
@@ -236,7 +241,11 @@
         var before = state;
         state = fit.reportFit(state, d);
         var changed = Math.abs(state.view.width - before.view.width) >= 1 || Math.abs(state.view.height - before.view.height) >= 1;
-        log.push({ at: Math.round(performance.now() - t0), r: [d.width, d.height, d.need, d.side, d.edge, d.vfree, d.vover, d.vin, d.vcut, d.slide, d.vown, d.vmore, d.vdoc], stale: state === before ? 1 : 0, view: changed ? [state.view.width, Math.round(state.view.height), +state.view.scale.toFixed(3)] : null });
+        // Lo que pide de más la lámina más alta de las ocultas, con las reglas simples del banco.
+        var ownNeed = d.vover > 2 ? d.height + Math.max(d.vover, d.vdoc || 0) : d.height - (d.vfree || 0);
+        var tl = d.tallest || null;
+        var tallNeed = tl ? (tl.vover > 2 ? d.height + Math.max(tl.vover, tl.vdoc || 0) : d.height - (tl.vfree || 0)) : null;
+        log.push({ at: Math.round(performance.now() - t0), r: [d.width, d.height, d.need, d.side, d.edge, d.vfree, d.vover, d.vin, d.vcut, d.slide, d.vown, tallNeed === null ? 0 : Math.round(tallNeed - ownNeed), d.vdoc], t: tl, stale: state === before ? 1 : 0, view: changed ? [state.view.width, Math.round(state.view.height), +state.view.scale.toFixed(3)] : null });
         if (changed) { apply(); sendHelper({ t: 'resize' }); measure(); }
       }
     }
