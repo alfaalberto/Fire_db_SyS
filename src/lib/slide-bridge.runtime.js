@@ -1447,7 +1447,8 @@ export function slideBridgeRuntime() {
       // Y lo mismo para la lámina más alta de las que no están a la vista, si
       // puede servir de algo: con poco margen a los lados no hay qué ampliar
       // (mismo criterio que en `deck-fit`).
-      var worth = !(aheadLimit > 0) || height + spare.vover < aheadLimit;
+      var own = spare.vover > 2 ? height + spare.vover : height - spare.vfree;
+      var worth = !(aheadLimit > 0) || own < aheadLimit;
       if (worth && (wantAhead === 2 || (wantAhead === 1 && spare.side >= Math.max(24, width * 0.05)))) {
         var other = null;
         try { other = tallestSlide(height); } catch (e2) { other = null; }
