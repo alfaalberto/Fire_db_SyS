@@ -851,13 +851,13 @@ export function slideBridgeRuntime() {
   }
 
   /**
-   * Cuánto más alto es el contenido de la lámina más larga que el de la que
-   * está a la vista. Las ocultas con `display:none` no tienen medidas: se les
-   * da un instante, sin llegar a pintarse, el `display` de la visible. Así el
-   * tamaño se elige de una vez para toda la presentación y no hay que
-   * corregirlo al llegar a una lámina más larga.
+   * Cuánto más alta que la lámina a la vista es la más alta de las demás.
+   * Las ocultas con `display:none` no tienen medidas: se les da un instante,
+   * sin llegar a pintarse, el `display` de la visible. Así el tamaño se elige
+   * de una vez para toda la presentación y no hay que corregirlo al llegar a
+   * una lámina más larga.
    */
-  function tallerSlides() {
+  function tallerSlides(vh) {
     if (!slideHeights) return 0;
     var g = findGroup();
     var shown = detectFromGroup();
@@ -867,11 +867,17 @@ export function slideBridgeRuntime() {
     if (!parent) return 0;
     var activeStyle = getComputedStyle(active);
     if (activeStyle.display === 'none') return 0;
-    // Apiladas en un marco no se estorban al medirlas; puestas una tras otra
-    // solo se miden si su contenedor las apila en vertical.
+    var activeBox = active.getBoundingClientRect();
     var stacked = activeStyle.position === 'absolute' || activeStyle.position === 'fixed';
     var column = false;
-    if (!stacked) {
+    if (stacked) {
+      // Apiladas en un marco de alto fijo, o que no llega al pie de la
+      // ventana: lo que no quepa en él se desplaza o se recorta por diseño,
+      // con cualquier ventana. No es la ventana lo que las limita.
+      if (inRigidBox(active) || activeBox.bottom < vh * 0.9) return 0;
+    } else {
+      // Puestas una tras otra solo se miden si su contenedor las apila en
+      // vertical: así no descolocan a las demás mientras se miden.
       var parentStyle = getComputedStyle(parent);
       column = (parentStyle.display === 'flex' || parentStyle.display === 'inline-flex') && parentStyle.flexDirection.indexOf('column') === 0;
       if (!column && parentStyle.display !== 'block' && parentStyle.display !== 'flow-root') return 0;
@@ -884,19 +890,27 @@ export function slideBridgeRuntime() {
     for (var i = 0; i < g.nodes.length; i++) {
       var el = g.nodes[i];
       if (el === active || el.parentElement !== parent) continue;
-      var height = slideHeights.get(el);
-      if (height === undefined) {
-        if (getComputedStyle(el).display !== 'none') continue;
-        var style = el.getAttribute('style');
-        el.style.setProperty('display', activeStyle.display, 'important');
-        el.style.setProperty('visibility', 'hidden', 'important');
-        if (column) el.style.setProperty('flex', 'none', 'important');
-        height = contentHeight(el);
-        if (style === null) el.removeAttribute('style');
-        else el.setAttribute('style', style);
-        slideHeights.set(el, height);
+      // [alto de su contenido, alto de su caja]
+      var size = slideHeights.get(el);
+      if (!size) {
+        if (getComputedStyle(el).display === 'none') {
+          var style = el.getAttribute('style');
+          el.style.setProperty('display', activeStyle.display, 'important');
+          el.style.setProperty('visibility', 'hidden', 'important');
+          if (column) el.style.setProperty('flex', 'none', 'important');
+          size = [contentHeight(el), el.getBoundingClientRect().height];
+          if (style === null) el.removeAttribute('style');
+          else el.setAttribute('style', style);
+        } else {
+          // Oculta de otro modo (transparente, invisible): ya tiene medidas.
+          size = [contentHeight(el), el.getBoundingClientRect().height];
+        }
+        slideHeights.set(el, size);
       }
-      if (height - base > extra) extra = height - base;
+      var delta = size[0] - base;
+      // En el flujo la caja mide lo que su contenido, con rellenos y todo.
+      if (!stacked && size[1] - activeBox.height > delta) delta = size[1] - activeBox.height;
+      if (delta > extra) extra = delta;
     }
     return extra;
   }
@@ -1245,7 +1259,7 @@ export function slideBridgeRuntime() {
       msg.vown = spare.vown;
       msg.vcut = spare.vcut;
       var more = 0;
-      try { more = Math.ceil(tallerSlides()); } catch (e2) { more = 0; }
+      try { more = Math.ceil(tallerSlides(height)); } catch (e2) { more = 0; }
       msg.vmore = more;
       text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vin + '/' + spare.vown + '/' + spare.vcut + '/' + more;
     }
