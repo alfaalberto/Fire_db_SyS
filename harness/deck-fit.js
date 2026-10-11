@@ -211,13 +211,15 @@ var DeckFit = (() => {
     } else if (chase && chase.slide === slide && height > chase.height + 1 && spill >= chase.spill * FIT_PROGRESS) {
       model.tall = chase.base;
       if (inner >= outer) model.inner = true;
-      else if (content <= 2) model.slack = Math.max(model.slack, whole);
-      else scrolls = [...scrolls, slide];
+      if (inner < outer || outer > 2 && inner - outer <= 2) {
+        if (content <= 2) model.slack = Math.max(model.slack, whole, chase.whole);
+        else scrolls = [...scrolls, slide];
+      }
       chase = null;
       spill = 0;
     } else {
       const same = chase !== null && chase.slide === slide;
-      if (!same || height > chase.height + 1) chase = { slide, spill, height, base: same ? chase.base : state.model.tall };
+      if (!same || height > chase.height + 1) chase = { slide, spill, whole: same ? Math.max(whole, chase.whole) : whole, height, base: same ? chase.base : state.model.tall };
       model.tall = grow(model.tall, Math.ceil(Math.min(height + spill, box.height)));
     }
     const kept = model.col;

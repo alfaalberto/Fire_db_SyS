@@ -109,6 +109,11 @@
       var de = document.documentElement, body = document.body;
       if (!body) return { vw: vw, vh: vh, empty: true };
       var out = { vw: vw, vh: vh, sw: Math.max(de.scrollWidth, body.scrollWidth), sh: Math.max(de.scrollHeight, body.scrollHeight) };
+      // ¿Puede desplazarse el documento? (con `overflow:hidden` un alto de más no se ve ni se alcanza)
+      var rs = getComputedStyle(de), bs = getComputedStyle(body);
+      var vp = rs.overflowX === 'visible' && rs.overflowY === 'visible' ? bs.overflowY : rs.overflowY;
+      out.scrolls = vp !== 'hidden' && vp !== 'clip';
+      if (!out.scrolls) out.sh = vh;
       var clipMemo = new Map();
       function clipOf(el) {
         if (!el || el === de) return [-1e9, -1e9, 1e9, 1e9, 0];
