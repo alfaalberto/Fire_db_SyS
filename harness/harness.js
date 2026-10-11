@@ -236,7 +236,7 @@
         var before = state;
         state = fit.reportFit(state, d);
         var changed = Math.abs(state.view.width - before.view.width) >= 1 || Math.abs(state.view.height - before.view.height) >= 1;
-        log.push({ at: Math.round(performance.now() - t0), r: [d.width, d.height, d.need, d.side, d.edge, d.vfree, d.vover, d.vin, d.vcut, d.slide, d.vown, d.vmore], stale: state === before ? 1 : 0, view: changed ? [state.view.width, Math.round(state.view.height), +state.view.scale.toFixed(3)] : null });
+        log.push({ at: Math.round(performance.now() - t0), r: [d.width, d.height, d.need, d.side, d.edge, d.vfree, d.vover, d.vin, d.vcut, d.slide, d.vown, d.vmore, d.vdoc], stale: state === before ? 1 : 0, view: changed ? [state.view.width, Math.round(state.view.height), +state.view.scale.toFixed(3)] : null });
         if (changed) { apply(); sendHelper({ t: 'resize' }); measure(); }
       }
     }

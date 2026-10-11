@@ -870,17 +870,23 @@ export function slideBridgeRuntime() {
     var activeBox = active.getBoundingClientRect();
     var stacked = activeStyle.position === 'absolute' || activeStyle.position === 'fixed';
     var column = false;
-    if (stacked) {
-      // Apiladas en un marco de alto fijo, o que no llega al pie de la
-      // ventana: lo que no quepa en él se desplaza o se recorta por diseño,
-      // con cualquier ventana. No es la ventana lo que las limita.
-      if (inRigidBox(active) || activeBox.bottom < vh * 0.9) return 0;
-    } else {
+    if (!stacked) {
       // Puestas una tras otra solo se miden si su contenedor las apila en
       // vertical: así no descolocan a las demás mientras se miden.
       var parentStyle = getComputedStyle(parent);
       column = (parentStyle.display === 'flex' || parentStyle.display === 'inline-flex') && parentStyle.flexDirection.indexOf('column') === 0;
       if (!column && parentStyle.display !== 'block' && parentStyle.display !== 'flow-root') return 0;
+    }
+    // El marco que las contiene: el que las recorta o desplaza, o aquel sobre
+    // el que se apilan. Si su alto es fijo, o no llega al pie de la ventana,
+    // lo que no quepa en él se desplaza o se recorta por diseño con cualquier
+    // ventana: no es la ventana lo que limita a las láminas.
+    var host = stacked ? active.offsetParent : null;
+    for (var up = parent; up && up !== document.body && up !== document.documentElement; up = up.parentElement) {
+      if (getComputedStyle(up).overflowY !== 'visible') { host = up; break; }
+    }
+    if (host && host !== document.body && host !== document.documentElement) {
+      if (inRigidBox(host) || host.getBoundingClientRect().bottom < vh * 0.9) return 0;
     }
     var width = window.innerWidth;
     if (width !== slideHeightsAt) { slideHeights = new WeakMap(); slideHeightsAt = width; }
@@ -948,7 +954,8 @@ export function slideBridgeRuntime() {
    *   side   margen libre a cada lado de la columna de contenido (-1: no se sabe);
    *   edge   cuánto se adentran en ese margen los controles pegados al borde;
    *   vfree  altura que queda vacía (franjas grandes sin nada dibujado);
-   *   vover  lo que hay que desplazar el documento para verlo entero;
+   *   vover  lo que hay que desplazar el documento para ver su contenido;
+   *   vdoc   lo que el documento mide de más, haya o no algo ahí abajo;
    *   vin    lo mismo para su panel principal, si se desplaza por dentro;
    *   vown   ídem, cuando ese panel está en una caja de alto fijo: se
    *          desplaza por diseño, sea cual sea el tamaño de la ventana;
@@ -971,6 +978,7 @@ export function slideBridgeRuntime() {
     var visited = 0;
     var aborted = false;
     var vover = 0;
+    var vdoc = 0;
     var vin = 0;
     var vown = 0;
     var vcut = 0;
@@ -1142,7 +1150,10 @@ export function slideBridgeRuntime() {
     if (aborted) return null;
     if (docScrolls) {
       var docOver = Math.max(root.scrollHeight, body.scrollHeight) - vh;
-      if (docOver > 2 && beneath > 2) vover = Math.min(docOver, beneath);
+      if (docOver > 2) {
+        vdoc = docOver;
+        if (beneath > 2) vover = Math.min(docOver, beneath);
+      }
     }
 
     // Margen de cada franja ocupada.
@@ -1159,7 +1170,7 @@ export function slideBridgeRuntime() {
       if (firstUsed === -1) firstUsed = y;
       lastUsed = y;
     }
-    var out = { side: -1, edge: 0, vfree: 0, vover: Math.ceil(vover), vin: Math.ceil(vin), vown: Math.ceil(vown), vcut: Math.ceil(vcut) };
+    var out = { side: -1, edge: 0, vfree: 0, vover: Math.ceil(vover), vdoc: Math.ceil(vdoc), vin: Math.ceil(vin), vown: Math.ceil(vown), vcut: Math.ceil(vcut) };
     if (margins.length < 4) return out;
 
     // La columna es lo que ocupa la mayor parte de la altura; las barras de
@@ -1264,13 +1275,14 @@ export function slideBridgeRuntime() {
       msg.edge = spare.edge;
       msg.vfree = spare.vfree;
       msg.vover = spare.vover;
+      msg.vdoc = spare.vdoc;
       msg.vin = spare.vin;
       msg.vown = spare.vown;
       msg.vcut = spare.vcut;
       var more = 0;
       try { more = Math.ceil(tallerSlides(height)); } catch (e2) { more = 0; }
       msg.vmore = more;
-      text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vin + '/' + spare.vown + '/' + spare.vcut + '/' + more;
+      text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vdoc + '/' + spare.vin + '/' + spare.vown + '/' + spare.vcut + '/' + more;
     }
     if (text === lastLayout) return;
     lastLayout = text;
