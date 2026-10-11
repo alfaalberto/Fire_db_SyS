@@ -835,9 +835,9 @@ export function slideBridgeRuntime() {
    * Recorre lo que está a la vista y devuelve:
    *   side   margen libre a cada lado de la columna de contenido (-1: no se sabe);
    *   edge   cuánto se adentran en ese margen los controles pegados al borde;
-   *   vfree  altura que queda vacía (franjas sin nada dibujado);
+   *   vfree  altura que queda vacía (franjas grandes sin nada dibujado);
    *   vover  lo que el documento, o su panel principal, hay que desplazar;
-   *   vcut   lo que un contenedor que no se desplaza recorta por abajo.
+   *   vcut   lo que la ventana o el contenedor principal recortan por abajo.
    */
   function spareScan() {
     var vw = window.innerWidth;
@@ -849,9 +849,9 @@ export function slideBridgeRuntime() {
     var rowsN = Math.ceil(vh / SPARE_ROW);
     var minL = [];
     var maxR = [];
-    var inked = [];
+    var used = [];
     var y;
-    for (y = 0; y < rowsN; y++) { minL.push(vw); maxR.push(0); inked.push(0); }
+    for (y = 0; y < rowsN; y++) { minL.push(vw); maxR.push(0); used.push(0); }
     var items = [];
     var visited = 0;
     var aborted = false;
@@ -872,22 +872,11 @@ export function slideBridgeRuntime() {
       if (docOver > 2) vover = docOver;
     }
 
-    function put(l, t, r, b, ink) {
-      items.push(l, t, r, b);
-      var from = Math.floor(t / SPARE_ROW);
-      var to = Math.floor((b - 0.5) / SPARE_ROW);
-      if (from < 0) from = 0;
-      if (to >= rowsN) to = rowsN - 1;
-      for (var i = from; i <= to; i++) {
-        if (l < minL[i]) minL[i] = l;
-        if (r > maxR[i]) maxR[i] = r;
-        if (ink) inked[i] = 1;
-      }
-    }
-
     // Anota lo que se ve de [l,t,r,b] dentro de la zona visible [x0,y0,x1,y1].
-    // `hard` es el borde bajo el cual un contenedor que no se desplaza recorta.
-    function leaf(l, t, r, b, x0, y0, x1, y1, hard, counts, ink) {
+    // `hard` es el borde bajo el cual la ventana o el contenedor principal
+    // recortan sin dejar desplazar. `band`: una franja de lado a lado, que
+    // ocupa altura pero no define la columna.
+    function leaf(l, t, r, b, x0, y0, x1, y1, hard, counts, band) {
       if (counts && hard <= vh + 1 && b > hard + 2 && t < hard + vh && r > x0 + 1 && l < x1 - 1) {
         if (b - hard > vcut) vcut = b - hard;
       }
@@ -896,7 +885,21 @@ export function slideBridgeRuntime() {
       if (r > x1) r = x1;
       if (b > y1) b = y1;
       if (r - l < 1 || b - t < 1) return 0;
-      put(l, t, r, b, ink);
+      var from = Math.floor(t / SPARE_ROW);
+      var to = Math.floor((b - 0.5) / SPARE_ROW);
+      if (from < 0) from = 0;
+      if (to >= rowsN) to = rowsN - 1;
+      var i;
+      if (band) {
+        for (i = from; i <= to; i++) used[i] = 1;
+        return 1;
+      }
+      items.push(l, t, r, b);
+      for (i = from; i <= to; i++) {
+        used[i] = 1;
+        if (l < minL[i]) minL[i] = l;
+        if (r > maxR[i]) maxR[i] = r;
+      }
       return 1;
     }
 
@@ -911,7 +914,7 @@ export function slideBridgeRuntime() {
           range.selectNodeContents(node);
           var tr = range.getBoundingClientRect();
           if (tr.width < 1 || tr.height < 1) continue;
-          found += leaf(tr.left, tr.top, tr.right, tr.bottom, x0, y0, x1, y1, hard, true, 1);
+          found += leaf(tr.left, tr.top, tr.right, tr.bottom, x0, y0, x1, y1, hard, true, false);
           continue;
         }
         if (type !== 1) continue;
@@ -934,12 +937,13 @@ export function slideBridgeRuntime() {
         // que queda más abajo en un documento largo.
         if (w > 0 && h > 0 && !fixed && (box.top >= y1 + vh * 0.75 || box.bottom <= y0 - vh * 0.75 || box.left >= x1 + 4 || box.right <= x0 - 4)) continue;
         var hidden = cs.visibility !== 'visible';
-        // Lo fijado a la ventana no lo recorta ningún contenedor.
+        // Lo fijado a la ventana no lo recorta ningún contenedor; y si asoma
+        // por abajo es a propósito (un cajón recogido), no contenido cortado.
         var zx0 = fixed ? 0 : x0;
         var zy0 = fixed ? 0 : y0;
         var zx1 = fixed ? vw : x1;
         var zy1 = fixed ? vh : y1;
-        var zhard = fixed ? vh : hard;
+        var zhard = fixed ? Infinity : hard;
 
         if (SPARE_LEAF.test(tag) || (tag === 'SPAN' && SPARE_KATEX.test(className(node)))) {
           if (hidden || w < 1 || h < 1) continue;
@@ -948,7 +952,7 @@ export function slideBridgeRuntime() {
           // Adorno: una imagen o un dibujo casi transparente, o colocado a
           // mano como fondo o sin recibir el ratón.
           if (media && (shade < 0.3 || (placed && (cs.pointerEvents === 'none' || w >= vw * 0.97)))) continue;
-          found += leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, zhard, !(media && placed), 1);
+          found += leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, zhard, !(media && placed), false);
           continue;
         }
 
@@ -958,6 +962,10 @@ export function slideBridgeRuntime() {
         var ny1 = zy1;
         var nhard = zhard;
         var scroller = false;
+        // Parte de la caja que cae dentro de la ventana.
+        var seenW = Math.min(box.right, vw) - Math.max(box.left, 0);
+        var seenH = Math.min(box.bottom, vh) - Math.max(box.top, 0);
+        var main = seenW > 0 && seenH > 0 && seenW * seenH >= area * 0.25;
         if (!(node === body && bodyIsViewport)) {
           if (cs.overflowX !== 'visible') {
             if (box.left > nx0) nx0 = box.left;
@@ -971,6 +979,10 @@ export function slideBridgeRuntime() {
               // Lo que quede más abajo se alcanza desplazando el panel.
               scroller = true;
               nhard = Infinity;
+            } else if (!main) {
+              // Un recorte pequeño (un acordeón plegado, un texto abreviado)
+              // esconde a propósito: lo de dentro no es contenido cortado.
+              nhard = Infinity;
             } else if (box.bottom < nhard) {
               nhard = box.bottom;
             }
@@ -983,17 +995,17 @@ export function slideBridgeRuntime() {
         found += inside;
         if (!inside || hidden || w < 8 || h < 8) continue;
 
-        if (scroller) {
-          var inner = node.scrollHeight - node.clientHeight;
-          var seenW = Math.min(box.right, vw) - Math.max(box.left, 0);
-          var seenH = Math.min(box.bottom, vh) - Math.max(box.top, 0);
+        if (scroller && main) {
           // El panel principal (no un bloque de código ni una lista lateral).
-          if (inner > 2 && seenW > 0 && seenH > 0 && seenW * seenH >= area * 0.25 && inner > vover) vover = inner;
+          var inner = node.scrollHeight - node.clientHeight;
+          if (inner > 2 && inner > vover) vover = inner;
         }
-        // Una caja con algo dentro: una tarjeta, la propia lámina. Una caja a
-        // todo lo ancho es un fondo o una barra: cuenta lo que lleva dentro.
-        if (w < vw * 0.97 && w * h >= area * 0.004 && decorated(cs)) {
-          leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, zhard, true, 0);
+        // Una caja con algo dentro: una tarjeta, la propia lámina. De lado a
+        // lado es una barra o un fondo: la columna la define lo que lleva
+        // dentro, y solo si es baja (una barra) ocupa altura.
+        if (w * h >= area * 0.004 && decorated(cs)) {
+          if (w < vw * 0.97) leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, zhard, true, false);
+          else if (h < vh * 0.6) leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, Infinity, false, true);
         }
       }
       return found;
@@ -1016,7 +1028,7 @@ export function slideBridgeRuntime() {
       if (firstUsed === -1) firstUsed = y;
       lastUsed = y;
     }
-    var out = { side: -1, edge: 0, vfree: 0, vbox: 0, vover: Math.ceil(vover), vcut: Math.ceil(vcut) };
+    var out = { side: -1, edge: 0, vfree: 0, vover: Math.ceil(vover), vcut: Math.ceil(vcut) };
     if (margins.length < 4) return out;
 
     // La columna es lo que ocupa la mayor parte de la altura; las barras de
@@ -1028,10 +1040,18 @@ export function slideBridgeRuntime() {
     for (y = 0; y < rowsN; y++) {
       if (marginAt[y] >= typical - 1) { if (first === -1) first = y; last = y; }
     }
-    // Una «barra» que ocupa más de un quinto de la altura no es una barra.
+    // Lo que queda por encima y por debajo son barras si son bajas; si ocupan
+    // más de un quinto de la altura forman parte del contenido.
     var barLimit = (vh * 0.2) / SPARE_ROW;
-    if (first - firstUsed > barLimit) first = firstUsed;
-    if (lastUsed - last > barLimit) last = lastUsed;
+    var above = 0;
+    var below = 0;
+    for (y = 0; y < rowsN; y++) {
+      if (marginAt[y] === -1) continue;
+      if (y < first) above += 1;
+      else if (y > last) below += 1;
+    }
+    if (above > barLimit) first = firstUsed;
+    if (below > barLimit) last = lastUsed;
 
     var top = first * SPARE_ROW;
     var bottom = (last + 1) * SPARE_ROW;
@@ -1053,22 +1073,17 @@ export function slideBridgeRuntime() {
     out.side = Math.floor(side);
     out.edge = Math.ceil(edge);
 
-    // Franjas vacías grandes: espacio que la presentación no usa a lo alto.
+    // Franjas vacías grandes: altura que la presentación no usa. Las pequeñas
+    // son la separación entre sus bloques.
     if (vover <= 2 && vcut <= 2) {
       var bandMin = Math.max(40, vh * 0.05);
-      var runInk = 0;
-      var runAny = 0;
-      var freeInk = 0;
-      var freeAny = 0;
+      var run = 0;
+      var free = 0;
       for (y = 0; y <= rowsN; y++) {
-        var end = y === rowsN;
-        if (!end && !inked[y]) runInk += SPARE_ROW;
-        else { if (runInk >= bandMin) freeInk += runInk - 16; runInk = 0; }
-        if (!end && marginAt[y] === -1) runAny += SPARE_ROW;
-        else { if (runAny >= bandMin) freeAny += runAny - 16; runAny = 0; }
+        if (y < rowsN && !used[y]) run += SPARE_ROW;
+        else { if (run >= bandMin) free += run - 16; run = 0; }
       }
-      out.vfree = Math.floor(freeInk);
-      out.vbox = Math.floor(freeAny);
+      out.vfree = Math.floor(free);
     }
     return out;
   }
@@ -1113,13 +1128,15 @@ export function slideBridgeRuntime() {
     var msg = { t: 'layout', need: need, width: width, height: height };
     var text = need + '/' + width + '/' + height;
     if (spare) {
+      // La lámina a la vista: lo que cabe o no cabe se anota por lámina.
+      var shown = detect();
+      msg.slide = shown ? shown.index : -1;
       msg.side = spare.side;
       msg.edge = spare.edge;
       msg.vfree = spare.vfree;
-      msg.vbox = spare.vbox;
       msg.vover = spare.vover;
       msg.vcut = spare.vcut;
-      text += '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vbox + '/' + spare.vover + '/' + spare.vcut;
+      text += '/' + msg.slide + '/' + spare.side + '/' + spare.edge + '/' + spare.vfree + '/' + spare.vover + '/' + spare.vcut;
     }
     if (text === lastLayout) return;
     lastLayout = text;

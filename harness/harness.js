@@ -41,9 +41,13 @@
     ]);
     var at = texts[0].indexOf('export function slideBridgeRuntime');
     var fn = texts[0].slice(at).replace('export function', 'function').replace(/\s+$/, '');
+    fn = fn.replace('function unsettled()', 'window.__sysSpare = spareScan; function unsettled()');
+    var tail = '      out.vfree = Math.floor(free);\n    }\n    return out;';
+    if (fn.indexOf(tail) !== -1) fn = fn.replace(tail, '      out.vfree = Math.floor(free);\n    }\n    window.__sysSpareLast = {items: items, marginAt: marginAt, used: used, typical: typical, first: first, last: last, reach: reach};\n    return out;');
     H.bridge = "(function(){'use strict';(" + fn + ')();})();';
-    (0, eval)(texts[1]);
+    (0, eval)(texts[1] + '\n;window.DeckFit = DeckFit;');
     H.fit = window.DeckFit;
+    H.base = base;
     return { bridge: H.bridge.length, fit: Object.keys(H.fit).join(',') };
   };
 
@@ -232,7 +236,7 @@
         var before = state;
         state = fit.reportFit(state, d);
         var changed = Math.abs(state.view.width - before.view.width) >= 1 || Math.abs(state.view.height - before.view.height) >= 1;
-        log.push({ at: Math.round(performance.now() - t0), r: [d.width, d.height, d.need, d.side, d.edge, d.vfree, d.vbox, d.vover, d.vcut], stale: state === before ? 1 : 0, view: changed ? [state.view.width, Math.round(state.view.height), +state.view.scale.toFixed(3)] : null });
+        log.push({ at: Math.round(performance.now() - t0), r: [d.width, d.height, d.need, d.side, d.edge, d.vfree, d.vover, d.vcut, d.slide], stale: state === before ? 1 : 0, view: changed ? [state.view.width, Math.round(state.view.height), +state.view.scale.toFixed(3)] : null });
         if (changed) { apply(); sendHelper({ t: 'resize' }); measure(); }
       }
     }
@@ -286,7 +290,7 @@
           var s = await h.settle(opts.max || 10000);
           var chk = await h.check();
           var st = h.state;
-          job.results[deck.label] = { settle: s, view: [st.view.width, Math.round(st.view.height), +st.view.scale.toFixed(3)], model: st.model, rough: st.rough, gaveUp: st.gaveUp, needed: st.needed, log: h.log.slice(0, 12), check: chk, progress: h.progress, errors: h.errors.slice(0, 3) };
+          job.results[deck.label] = { settle: s, view: [st.view.width, Math.round(st.view.height), +st.view.scale.toFixed(3)], model: st.model, scrolls: st.scrolls, gaveUp: st.gaveUp, needed: st.needed, log: h.log.slice(0, 12), check: chk, progress: h.progress, errors: h.errors.slice(0, 3) };
           if (opts.keep) job.results[deck.label].handle = h; else h.close();
         } catch (e) { job.errors.push(deck.label + ': ' + (e && e.stack || e)); }
         job.done++;

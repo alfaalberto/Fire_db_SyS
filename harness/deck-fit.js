@@ -67,15 +67,14 @@ var DeckFit = (() => {
   function canZoom(box) {
     return box.width >= DESIGN_WIDTH * (1 + MIN_GAIN) && box.height > 0;
   }
-  function targetView(model, box, rough = null) {
+  function targetView(model, box) {
     var _a;
     const W = box.width;
     const H = box.height;
     if (!(W > 0) || !(H > 0)) return natural(box);
     let width = W;
     if (model.col !== null && canZoom(box)) {
-      const tall = Math.max((_a = model.tall) != null ? _a : 0, rough != null ? rough : 0);
-      width = Math.max(model.col, DESIGN_WIDTH, W / MAX_SCALE, tall * W / H);
+      width = Math.max(model.col, DESIGN_WIDTH, W / MAX_SCALE, ((_a = model.tall) != null ? _a : 0) * W / H);
       if (width > W / (1 + MIN_GAIN)) width = W;
     }
     if (model.wide !== null && model.wide > width) width = Math.min(model.wide, W / MIN_SCALE);
@@ -87,7 +86,7 @@ var DeckFit = (() => {
     return { width, height: H / scale, scale };
   }
   function settle(state) {
-    const fitted = state.gaveUp ? natural(state.box) : targetView(state.model, state.box, state.rough);
+    const fitted = state.gaveUp ? natural(state.box) : targetView(state.model, state.box);
     const view = state.enabled ? fitted : natural(state.box);
     return { ...state, view, needed: fitted.scale !== 1 };
   }
@@ -104,17 +103,18 @@ var DeckFit = (() => {
       widened: false,
       trial: null,
       tries: 0,
-      rough: null,
+      scrolls: [],
+      chase: null,
       changes: 0
     });
   }
   function resizeFit(state, box) {
     if (Math.abs(box.width - state.box.width) < 1 && Math.abs(box.height - state.box.height) < 1) return state;
-    return settle({ ...state, box, gaveUp: false, over: 0, widened: false, trial: null, tries: 0, changes: 0, settled: false });
+    return settle({ ...state, box, gaveUp: false, over: 0, widened: false, trial: null, tries: 0, scrolls: [], chase: null, changes: 0, settled: false });
   }
   function enableFit(state, enabled) {
     if (state.enabled === enabled) return state;
-    return settle({ ...state, enabled, gaveUp: false, over: 0, widened: false, trial: null, tries: 0, changes: 0, settled: false });
+    return settle({ ...state, enabled, gaveUp: false, over: 0, widened: false, trial: null, tries: 0, scrolls: [], chase: null, changes: 0, settled: false });
   }
   function resetFit(state) {
     return createFit(state.box, state.enabled, null);
@@ -130,7 +130,7 @@ var DeckFit = (() => {
     if (Math.abs(width - state.view.width) > 2) return state;
     if (measuredHeight > 0 && Math.abs(measuredHeight - state.view.height) > 2) return state;
     const model = { ...state.model };
-    let { over, widened, trial, rough } = state;
+    let { over, widened, trial, scrolls, chase } = state;
     const { tries } = state;
     const side = typeof report.side === "number" && report.side >= 0 ? report.side : null;
     if (trial) {
@@ -155,17 +155,32 @@ var DeckFit = (() => {
       over = 0;
       widened = false;
     }
+    const slide = typeof report.slide === "number" ? report.slide : -1;
     const spill = Math.max((_a = report.vover) != null ? _a : 0, (_b = report.vcut) != null ? _b : 0);
-    if (spill > 2) {
+    if (spill <= 2) {
+      chase = null;
+    } else if (!scrolls.includes(slide)) {
       const wanted = height + spill;
-      if (wanted <= box.height * SCROLL_LIMIT) model.tall = grow(model.tall, Math.ceil(wanted));
+      if (state.view.scale <= 1) {
+        if (wanted > box.height * SCROLL_LIMIT) scrolls = [...scrolls, slide];
+        else model.tall = grow(model.tall, Math.ceil(wanted));
+      } else if (wanted > box.height) {
+        scrolls = [...scrolls, slide];
+      } else if (chase && chase.slide === slide && spill >= chase.spill * FIT_PROGRESS) {
+        model.tall = chase.base;
+        scrolls = [...scrolls, slide];
+        chase = null;
+      } else {
+        chase = { slide, spill, base: chase && chase.slide === slide ? chase.base : state.model.tall };
+        model.tall = grow(model.tall, Math.ceil(wanted));
+      }
     }
     if (side !== null && side >= Math.max(MIN_MARGIN, width * MIN_MARGIN_RATIO) && !isFluid(model, side / width)) {
       const edge = typeof report.edge === "number" && report.edge > 0 ? report.edge : 0;
       model.col = grow(model.col, Math.ceil(width - 2 * side + 2 * Math.max(GUTTER, edge + EDGE_GAP)));
-      if (spill <= 2 && typeof report.vfree === "number") rough = grow(rough, Math.max(0, Math.floor(height - report.vfree)));
+      if (spill <= 2 && typeof report.vfree === "number") model.tall = grow(model.tall, Math.max(0, Math.floor(height - report.vfree)));
     }
-    let next = settle({ ...state, model, over, widened, trial, tries, rough });
+    let next = settle({ ...state, model, over, widened, trial, tries, scrolls, chase });
     if (sameView(next.view, state.view)) {
       return { ...next, view: state.view, settled: true };
     }
