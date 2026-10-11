@@ -830,13 +830,32 @@ export function slideBridgeRuntime() {
     return false;
   }
 
+  /** Alto que ocupa lo que lleva dentro una lámina: su texto, imágenes y controles. */
+  function contentHeight(slide) {
+    var top = Infinity;
+    var bottom = -Infinity;
+    var all = slide.getElementsByTagName('*');
+    for (var i = 0; i < all.length && i < 1500; i++) {
+      var el = all[i];
+      var holds = SPARE_LEAF.test(el.tagName);
+      for (var node = el.firstChild; node && !holds; node = node.nextSibling) {
+        if (node.nodeType === 3 && /\S/.test(node.nodeValue || '')) holds = true;
+      }
+      if (!holds) continue;
+      var box = el.getBoundingClientRect();
+      if (box.height < 1 || box.width < 1) continue;
+      if (box.top < top) top = box.top;
+      if (box.bottom > bottom) bottom = box.bottom;
+    }
+    return bottom > top ? bottom - top : 0;
+  }
+
   /**
-   * Cuánto más alta que la lámina a la vista es la más alta de las demás.
-   * Las que están ocultas con `display:none` no tienen medidas: se les da un
-   * instante, sin llegar a pintarse, las de la lámina visible. Así el tamaño
-   * se elige de una vez para toda la presentación y no hay que corregirlo al
-   * llegar a una lámina más larga. Solo para láminas puestas una tras otra en
-   * el flujo; las apiladas en un marco miden lo que el marco.
+   * Cuánto más alto es el contenido de la lámina más larga que el de la que
+   * está a la vista. Las ocultas con `display:none` no tienen medidas: se les
+   * da un instante, sin llegar a pintarse, el `display` de la visible. Así el
+   * tamaño se elige de una vez para toda la presentación y no hay que
+   * corregirlo al llegar a una lámina más larga.
    */
   function tallerSlides() {
     if (!slideHeights) return 0;
@@ -847,14 +866,20 @@ export function slideBridgeRuntime() {
     var parent = active.parentElement;
     if (!parent) return 0;
     var activeStyle = getComputedStyle(active);
-    if (activeStyle.position === 'absolute' || activeStyle.position === 'fixed' || activeStyle.display === 'none') return 0;
-    var parentStyle = getComputedStyle(parent);
-    var flow = parentStyle.display === 'block' || parentStyle.display === 'flow-root';
-    var column = (parentStyle.display === 'flex' || parentStyle.display === 'inline-flex') && parentStyle.flexDirection.indexOf('column') === 0;
-    if (!flow && !column) return 0;
+    if (activeStyle.display === 'none') return 0;
+    // Apiladas en un marco no se estorban al medirlas; puestas una tras otra
+    // solo se miden si su contenedor las apila en vertical.
+    var stacked = activeStyle.position === 'absolute' || activeStyle.position === 'fixed';
+    var column = false;
+    if (!stacked) {
+      var parentStyle = getComputedStyle(parent);
+      column = (parentStyle.display === 'flex' || parentStyle.display === 'inline-flex') && parentStyle.flexDirection.indexOf('column') === 0;
+      if (!column && parentStyle.display !== 'block' && parentStyle.display !== 'flow-root') return 0;
+    }
     var width = window.innerWidth;
     if (width !== slideHeightsAt) { slideHeights = new WeakMap(); slideHeightsAt = width; }
-    var base = active.getBoundingClientRect().height;
+    var base = contentHeight(active);
+    if (!base) return 0;
     var extra = 0;
     for (var i = 0; i < g.nodes.length; i++) {
       var el = g.nodes[i];
@@ -866,7 +891,7 @@ export function slideBridgeRuntime() {
         el.style.setProperty('display', activeStyle.display, 'important');
         el.style.setProperty('visibility', 'hidden', 'important');
         if (column) el.style.setProperty('flex', 'none', 'important');
-        height = el.getBoundingClientRect().height;
+        height = contentHeight(el);
         if (style === null) el.removeAttribute('style');
         else el.setAttribute('style', style);
         slideHeights.set(el, height);
