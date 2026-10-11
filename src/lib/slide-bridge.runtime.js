@@ -984,18 +984,20 @@ export function slideBridgeRuntime() {
     var bodyIsViewport = rootStyle.overflowX === 'visible' && rootStyle.overflowY === 'visible';
     var viewportOverflow = bodyIsViewport ? bodyStyle.overflowY : rootStyle.overflowY;
     var docScrolls = viewportOverflow !== 'hidden' && viewportOverflow !== 'clip';
-    if (docScrolls) {
-      var docOver = Math.max(root.scrollHeight, body.scrollHeight) - vh;
-      if (docOver > 2) vover = docOver;
-    }
+    // Hasta dónde llega, bajo la ventana, lo que se alcanza desplazando el
+    // documento. Un documento más alto que la ventana sin nada ahí abajo (un
+    // `min-height:100vh` más un margen) no obliga a desplazarse.
+    var beneath = 0;
 
     // Anota lo que se ve de [l,t,r,b] dentro de la zona visible [x0,y0,x1,y1].
     // `hard` es el borde bajo el cual la ventana o el contenedor principal
-    // recortan sin dejar desplazar. `band`: una franja de lado a lado, que
-    // ocupa altura pero no define la columna.
-    function leaf(l, t, r, b, x0, y0, x1, y1, hard, counts, band) {
-      if (counts && hard <= vh + 1 && b > hard + 2 && t < hard + vh && r > x0 + 1 && l < x1 - 1) {
-        if (b - hard > vcut) vcut = b - hard;
+    // recortan sin dejar desplazar. `flow`: va en el documento, sin nada que
+    // lo recorte ni lo desplace por su cuenta. `band`: una franja de lado a
+    // lado, que ocupa altura pero no define la columna.
+    function leaf(l, t, r, b, x0, y0, x1, y1, hard, flow, counts, band) {
+      if (counts && r > x0 + 1 && l < x1 - 1) {
+        if (hard <= vh + 1 && b > hard + 2 && t < hard + vh && b - hard > vcut) vcut = b - hard;
+        if (flow && b > vh + 2 && b - vh > beneath) beneath = b - vh;
       }
       if (l < x0) l = x0;
       if (t < y0) t = y0;
@@ -1020,7 +1022,7 @@ export function slideBridgeRuntime() {
       return 1;
     }
 
-    function visit(parent, x0, y0, x1, y1, hard, fade, veiled) {
+    function visit(parent, x0, y0, x1, y1, hard, flow, fade, veiled) {
       var found = 0;
       for (var node = parent.firstChild; node && !aborted; node = node.nextSibling) {
         var type = node.nodeType;
@@ -1031,7 +1033,7 @@ export function slideBridgeRuntime() {
           range.selectNodeContents(node);
           var tr = range.getBoundingClientRect();
           if (tr.width < 1 || tr.height < 1) continue;
-          found += leaf(tr.left, tr.top, tr.right, tr.bottom, x0, y0, x1, y1, hard, true, false);
+          found += leaf(tr.left, tr.top, tr.right, tr.bottom, x0, y0, x1, y1, hard, flow, true, false);
           continue;
         }
         if (type !== 1) continue;
@@ -1061,6 +1063,7 @@ export function slideBridgeRuntime() {
         var zx1 = fixed ? vw : x1;
         var zy1 = fixed ? vh : y1;
         var zhard = fixed ? Infinity : hard;
+        var zflow = flow && !fixed;
 
         if (SPARE_LEAF.test(tag) || (tag === 'SPAN' && SPARE_KATEX.test(className(node)))) {
           if (hidden || w < 1 || h < 1) continue;
@@ -1069,7 +1072,7 @@ export function slideBridgeRuntime() {
           // Adorno: una imagen o un dibujo casi transparente, o colocado a
           // mano como fondo o sin recibir el ratón.
           if (media && (shade < 0.3 || (placed && (cs.pointerEvents === 'none' || w >= vw * 0.97)))) continue;
-          found += leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, zhard, !(media && placed), false);
+          found += leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, zhard, zflow, !(media && placed), false);
           continue;
         }
 
@@ -1078,6 +1081,7 @@ export function slideBridgeRuntime() {
         var nx1 = zx1;
         var ny1 = zy1;
         var nhard = zhard;
+        var nflow = zflow;
         var scroller = false;
         // Parte de la caja que cae dentro de la ventana.
         var seenW = Math.min(box.right, vw) - Math.max(box.left, 0);
@@ -1091,6 +1095,7 @@ export function slideBridgeRuntime() {
           }
           var oy = cs.overflowY;
           if (oy !== 'visible') {
+            nflow = false;
             if (box.top > ny0) ny0 = box.top;
             if (box.bottom < ny1) ny1 = box.bottom;
             if (oy === 'auto' || oy === 'scroll') {
@@ -1110,7 +1115,7 @@ export function slideBridgeRuntime() {
         // Nada de lo suyo queda a la vista.
         if (nx1 - nx0 < 1 || ny1 - ny0 < 1) continue;
 
-        var inside = visit(node, nx0, ny0, nx1, ny1, nhard, shade, hidden);
+        var inside = visit(node, nx0, ny0, nx1, ny1, nhard, nflow, shade, hidden);
         found += inside;
         if (!inside || hidden || w < 8 || h < 8) continue;
 
@@ -1126,15 +1131,19 @@ export function slideBridgeRuntime() {
         // lado es una barra o un fondo: la columna la define lo que lleva
         // dentro, y solo si es baja (una barra) ocupa altura.
         if (w * h >= area * 0.004 && decorated(cs)) {
-          if (w < vw * 0.97) leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, zhard, true, false);
-          else if (h < vh * 0.6) leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, Infinity, false, true);
+          if (w < vw * 0.97) leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, zhard, zflow, true, false);
+          else if (h < vh * 0.6) leaf(box.left, box.top, box.right, box.bottom, zx0, zy0, zx1, zy1, Infinity, false, false, true);
         }
       }
       return found;
     }
 
-    visit(root, 0, 0, vw, vh, docScrolls ? Infinity : vh, 1, false);
+    visit(root, 0, 0, vw, vh, docScrolls ? Infinity : vh, docScrolls, 1, false);
     if (aborted) return null;
+    if (docScrolls) {
+      var docOver = Math.max(root.scrollHeight, body.scrollHeight) - vh;
+      if (docOver > 2 && beneath > 2) vover = Math.min(docOver, beneath);
+    }
 
     // Margen de cada franja ocupada.
     var margins = [];

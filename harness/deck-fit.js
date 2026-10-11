@@ -202,6 +202,8 @@ var DeckFit = (() => {
   }
   var MEMORY_KEY = "sys.tamanos";
   var MEMORY_LIMIT = 240;
+  var MEMORY_DAYS = 21;
+  var DAY = 864e5;
   function readMemory() {
     try {
       const raw = localStorage.getItem(MEMORY_KEY);
@@ -217,19 +219,24 @@ var DeckFit = (() => {
   function unpack(value) {
     return typeof value === "number" && value > 0 && Number.isFinite(value) ? value : null;
   }
-  function recallModel(key) {
+  function recallModel(key, now = Date.now()) {
     if (!key) return null;
     const entry = readMemory()[key];
     if (!Array.isArray(entry)) return null;
+    const day = unpack(entry[5]);
+    if (day === null || Math.floor(now / DAY) - day > MEMORY_DAYS) return null;
     const model = { col: unpack(entry[0]), wide: unpack(entry[1]), tall: unpack(entry[2]), fluid: unpack(entry[3]), inner: entry[4] === 1 };
     return isEmpty(model) ? null : model;
   }
-  function rememberModel(key, model) {
+  function rememberModel(key, model, now = Date.now()) {
     if (!key) return;
     try {
       const memory = readMemory();
+      const since = Array.isArray(memory[key]) ? unpack(memory[key][5]) : null;
       delete memory[key];
-      if (!isEmpty(model)) memory[key] = [pack(model.col), pack(model.wide), pack(model.tall), pack(model.fluid), model.inner ? 1 : 0];
+      if (!isEmpty(model)) {
+        memory[key] = [pack(model.col), pack(model.wide), pack(model.tall), pack(model.fluid), model.inner ? 1 : 0, since != null ? since : Math.floor(now / DAY)];
+      }
       const keys = Object.keys(memory);
       for (let i = 0; i < keys.length - MEMORY_LIMIT; i++) delete memory[keys[i]];
       localStorage.setItem(MEMORY_KEY, JSON.stringify(memory));
