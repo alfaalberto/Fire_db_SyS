@@ -99,16 +99,38 @@ Lo único que se le añade es un puente (`src/lib/slide-bridge.runtime.js`) que:
 - convierte con KaTeX las fórmulas que el archivo deja en crudo (delimitadores que
   su configuración no reconoce, texto añadido después de su único repaso, o KaTeX
   ausente). Una presentación que se convierte sola no se toca;
-- mide si el contenido se sale a lo ancho (una barra de botones en el teléfono) y,
-  en ese caso, la plataforma la dibuja con el ancho que necesita y la reduce hasta
-  caber, con un mínimo del 60 %. Quien prefiera el tamaño natural lo elige en
-  «Más opciones → Ver a tamaño real»;
+- mide lo que la presentación necesita y lo que deja libre, para mostrarla al
+  tamaño que le conviene (ver más abajo);
 - reenvía los errores de ejecución, que el docente ve en modo edición.
 
 Entrar o salir del modo presentación no recarga la presentación ni pierde la lámina.
 
 Los fragmentos sueltos (`<h1>…</h1><p>…</p>`, sin `<html>`) reciben una plantilla
 de la plataforma con tipografía, tema claro u oscuro y KaTeX local.
+
+### Tamaño con el que se muestran
+
+La presentación se dibuja con el tamaño que le conviene y se escala hasta ocupar
+el marco que le deja la plataforma. El puente mide y `src/lib/deck-fit.ts` decide:
+
+- **No cabe a lo ancho** (una barra de botones en el teléfono): se dibuja con el
+  ancho que necesita y se reduce hasta caber, con un mínimo del 60 %.
+- **Queda pequeña** (una columna de 1200 px o una lámina 16:9 de medidas fijas en
+  una pantalla de 1920): se amplía hasta aprovechar el marco. Solo consume el
+  espacio que la presentación deja vacío: nunca hace que algo deje de caber ni
+  obliga a desplazarse donde antes no hacía falta. Cuenta con su lámina más alta,
+  así que el tamaño es el mismo en todas, y se recalcula al instante al cambiar la
+  ventana o al entrar en modo presentación, sin recargar nada.
+
+No se amplían las que ya ocupan la pantalla, las que se leen desplazándolas ni
+aquellas cuyos márgenes dependen de la ventana (un `80vw`): en esas no hay nada
+que aprovechar. Tampoco en marcos de menos de unos 1350 px de ancho, porque a una
+presentación nunca se le da una ventana menor de 1280 px, la de un portátil; por
+debajo cambiaría a su disposición de tableta.
+
+Lo aprendido de cada presentación se recuerda en el navegador durante tres
+semanas (`sys.tamanos` en `localStorage`), para que la siguiente vez aparezca ya
+a su tamaño. Quien prefiera verla a tamaño real lo elige en «Más opciones».
 
 ### Recomendaciones para los archivos
 
@@ -138,6 +160,7 @@ src/hooks/                Estado del curso, sesión y ruta (#/t/<tema>/<n>)
 src/lib/data/             Lectura por REST, caché en IndexedDB y almacén del curso
 src/lib/admin/            Sesión de Google y publicación (carga diferida)
 src/lib/slide-*.ts|js     Documento que recibe el iframe y puente
+src/lib/deck-fit.ts       Tamaño con el que se muestra cada presentación
 src/lib/tree.ts           Operaciones sobre el temario
 e2e/                      Pruebas de extremo a extremo
 firestore.rules           Reglas de acceso
@@ -146,9 +169,10 @@ public/katex/             KaTeX servido por la plataforma
 
 ## Pruebas
 
-- `npm test`: pruebas unitarias (Vitest) de temario, formato de datos, publicación
-  y construcción del documento.
+- `npm test`: pruebas unitarias (Vitest) de temario, formato de datos, publicación,
+  construcción del documento y ajuste de tamaño.
 - `npm run test:e2e`: Playwright contra `next start`, con Firestore y la sesión
   simulados en memoria; nunca tocan la base de datos real. Cubren la lectura, el
   modo presentación, la edición y publicación, la migración, el teléfono, las
-  fórmulas en crudo y el ajuste de ancho.
+  fórmulas en crudo y el ajuste de tamaño (reducir lo que no cabe y ampliar lo
+  que queda pequeño).

@@ -1,6 +1,21 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import {
+  canZoom,
+  createFit,
+  enableFit,
+  forgetModel,
+  recallModel,
+  rememberModel,
+  reportFit,
+  resetFit,
+  resizeFit,
+  sameModel,
+  type DeckModel,
+  type FitState as Fit,
+  type LayoutReport,
+} from '@/lib/deck-fit';
 import { buildSlideSrcDoc } from '@/lib/slide-document';
 import { cn } from '@/lib/utils';
 
@@ -36,16 +51,21 @@ interface SlideFrameProps {
   onRuntimeError?: (message: string) => void;
   /** Fórmulas que la presentación dejó en crudo y convirtió la plataforma. */
   onMathRescue?: (count: number) => void;
-  /** `false` la deja a su tamaño natural aunque no quepa a lo ancho. */
+  /** `false` la deja a su tamaño natural, sin reducirla ni ampliarla. */
   fit?: boolean;
   onFit?: (state: FitState) => void;
+  /** Identifica el contenido: lo aprendido de su tamaño se recuerda entre visitas. */
+  memoKey?: string;
 }
 
 export interface FitState {
   /** Escala con la que se muestra (1 = tamaño natural). */
   scale: number;
-  /** El contenido se sale a lo ancho: tiene sentido ofrecer el ajuste. */
-  needed: boolean;
+  /**
+   * Escala que le corresponde con el ajuste activado: menor que 1 si no cabe
+   * a lo ancho, mayor si queda pequeña. Si no es 1, tiene sentido ofrecerlo.
+   */
+  fitted: number;
 }
 
 const TRUSTED = process.env.NEXT_PUBLIC_TRUST_SLIDES !== 'false';
@@ -55,14 +75,8 @@ const TRUSTED = process.env.NEXT_PUBLIC_TRUST_SLIDES !== 'false';
 const SANDBOX =
   'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-pointer-lock allow-downloads';
 
-/** Reducción máxima; por debajo el texto deja de leerse. Igual a MIN_FIT en el puente. */
-const MIN_SCALE = 0.6;
-/** Un desborde mínimo (una barra de desplazamiento, un borde) no justifica reducir. */
-const FIT_TOLERANCE = 1.03;
-/** Ajustes seguidos permitidos mientras la presentación se reacomoda. */
-const MAX_FIT_STEPS = 3;
-/** Si agrandar no acorta lo que sobresale al menos esto, no tiene arreglo. */
-const FIT_PROGRESS = 0.85;
+/** Si la primera medida tarda más que esto, la presentación se muestra ya. */
+const REVEAL_TIMEOUT = 900;
 
 function newToken(): string {
   const bytes = new Uint8Array(12);
@@ -76,10 +90,10 @@ function newToken(): string {
  * modo presentación, o cambiar el tema de la app, se comunica por mensajes
  * para que la presentación no se reinicie ni pierda la lámina en la que va.
  *
- * Si el contenido no cabe a lo ancho (una barra de botones que se sale en un
- * teléfono, por ejemplo), el iframe se dibuja con el ancho que necesita y se
- * reduce hasta caber: se ve entera, como una página de escritorio en el móvil,
- * en lugar de recortada.
+ * El iframe se dibuja con el tamaño que le conviene a la presentación y se
+ * escala hasta ocupar el marco (ver `deck-fit`): si no cabe a lo ancho se
+ * reduce, en lugar de recortarla, y si en una pantalla grande queda pequeña
+ * se amplía hasta aprovecharla.
  */
 export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function SlideFrame(
   {
@@ -99,6 +113,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
     onRuntimeError,
     onMathRescue,
     onFit,
+    memoKey = '',
   },
   ref,
 ) {
@@ -107,13 +122,17 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
   const tokenRef = useRef<string>('');
   if (!tokenRef.current) tokenRef.current = newToken();
   const [loaded, setLoaded] = useState(false);
+  // Se muestra cuando ya tiene su tamaño, para que no se la vea cambiar.
+  const [revealed, setRevealed] = useState(false);
   const readyRef = useRef(false);
-  // Ancho disponible y ancho con el que se dibuja el iframe (null = el natural).
-  const [boxWidth, setBoxWidth] = useState(0);
-  const [fitWidth, setFitWidth] = useState<number | null>(null);
-  const [fitNeeded, setFitNeeded] = useState(false);
-  const fitState = useRef({ box: 0, width: null as number | null, steps: 0, over: 0, gaveUp: false, enabled: fit });
-  fitState.current.enabled = fit;
+  // Tamaño con el que se dibuja (ver `deck-fit`). La referencia es la verdad;
+  // el estado solo guarda lo que afecta a lo que se pinta.
+  const fitRef = useRef<Fit | null>(null);
+  if (!fitRef.current) fitRef.current = createFit({ width: 0, height: 0 }, fit, null);
+  const [view, setView] = useState({ width: 0, scale: 1 });
+  const [fitted, setFitted] = useState(1);
+  const memoRef = useRef({ key: memoKey, saved: null as DeckModel | null, timer: null as ReturnType<typeof setTimeout> | null });
+  memoRef.current.key = memoKey;
 
   // Valores con los que se construye el documento; los cambios posteriores
   // viajan por mensaje (ver efectos de abajo).
@@ -148,38 +167,75 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
     return true;
   }, []);
 
-  /** Vuelve al tamaño natural y olvida lo medido. */
-  const resetFit = useCallback(() => {
-    const state = fitState.current;
-    state.width = null;
-    state.steps = 0;
-    state.over = 0;
-    state.gaveUp = false;
-    setFitWidth(null);
-    setFitNeeded(false);
+  /** Pide al puente que mida con el tamaño actual. */
+  const measure = useCallback(() => {
+    const state = fitRef.current;
+    if (!state || !readyRef.current) return;
+    // (El espacio libre se mide aunque el ajuste esté desactivado: así se sabe si hay algo que ofrecer.)
+    send({ t: 'measure', spare: canZoom(state.box), width: Math.round(state.view.width) });
+  }, [send]);
+
+  /** Adopta un nuevo estado del ajuste y refleja en pantalla lo que cambió. */
+  const adopt = useCallback((next: Fit) => {
+    const before = fitRef.current;
+    fitRef.current = next;
+    setView((current) => (current.width === next.view.width && current.scale === next.view.scale ? current : { width: next.view.width, scale: next.view.scale }));
+    setFitted(next.fitted);
+    if (next.settled) setRevealed(true);
+    // Lo aprendido se guarda para la próxima visita (sin escribir a cada paso).
+    const memo = memoRef.current;
+    if (memo.key && before && !sameModel(before.model, next.model)) {
+      if (memo.timer) clearTimeout(memo.timer);
+      memo.timer = setTimeout(() => {
+        memo.timer = null;
+        const model = fitRef.current?.model;
+        if (model && memo.key && !(memo.saved && sameModel(memo.saved, model))) {
+          rememberModel(memo.key, model);
+          memo.saved = model;
+        }
+      }, 600);
+    }
   }, []);
 
   useEffect(() => {
     setLoaded(false);
+    setRevealed(false);
     readyRef.current = false;
-    resetFit();
-  }, [srcDoc, resetFit]);
+    // Presentación nueva: se parte de lo que se recuerde de ella.
+    const current = fitRef.current!;
+    const recalled = recallModel(memoRef.current.key);
+    memoRef.current.saved = recalled;
+    adopt(createFit(current.box, current.enabled, recalled));
+    // `adopt` y `memoKey` no cambian lo que hay que hacer al cambiar el documento.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [srcDoc]);
 
-  // Con otro ancho disponible la medida anterior ya no vale: se vuelve al
-  // tamaño natural y el puente, al notar el cambio, mide de nuevo.
+  useEffect(() => {
+    const memo = memoRef.current;
+    return () => {
+      // Lo pendiente de guardar se guarda al salir.
+      if (!memo.timer) return;
+      clearTimeout(memo.timer);
+      memo.timer = null;
+      const model = fitRef.current?.model;
+      if (model && memo.key) rememberModel(memo.key, model);
+    };
+  }, []);
+
+  // El marco cambió de tamaño (otra ventana, el temario plegado, pantalla
+  // completa): lo aprendido sigue valiendo y el ajuste es inmediato.
   useEffect(() => {
     const element = boxRef.current;
     if (!element || typeof ResizeObserver !== 'function') return;
     const observer = new ResizeObserver((entries) => {
-      const width = Math.round(entries[0].contentRect.width);
-      if (width === fitState.current.box) return;
-      fitState.current.box = width;
-      setBoxWidth(width);
-      resetFit();
+      const rect = entries[0].contentRect;
+      const state = fitRef.current!;
+      const next = resizeFit(state, { width: Math.round(rect.width), height: Math.round(rect.height) });
+      if (next !== state) adopt(next);
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [resetFit]);
+  }, [adopt]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -206,6 +262,7 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
           setLoaded(true);
           send({ t: 'mode', presenting: live.current.presenting });
           send({ t: 'theme', theme: live.current.theme });
+          measure();
           break;
         case 'progress':
           h.onProgress?.(typeof data.index === 'number' && typeof data.total === 'number' ? { index: data.index, total: data.total } : null);
@@ -232,67 +289,64 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
           h.onMathRescue?.(Number(data.count) || 0);
           break;
         case 'layout': {
-          const need = Number(data.need);
-          const width = Number(data.width);
-          const state = fitState.current;
-          if (!(need > 0) || !(width > 0) || state.box <= 0 || state.gaveUp) break;
-          const current = state.width ?? state.box;
-          // Medida tomada con otro ancho: llegó tarde, tras un cambio de tamaño.
-          if (Math.abs(width - current) > 2) break;
-          if (need <= width * FIT_TOLERANCE) break;
-          setFitNeeded(true);
-          if (!state.enabled) break;
-          const over = need - width;
-          if (state.width !== null && over >= state.over * FIT_PROGRESS) {
-            // Agrandar no acortó lo que sobresale: mide según la ventana (un
-            // `97vw` más relleno) y nunca cabrá. Se deja a su tamaño natural.
-            state.gaveUp = true;
-            state.width = null;
-            setFitWidth(null);
-            setFitNeeded(false);
-            break;
-          }
-          if (state.steps >= MAX_FIT_STEPS) break;
-          const next = Math.min(Math.ceil(need), Math.floor(state.box / MIN_SCALE));
-          if (next <= current + 4) break;
-          state.width = next;
-          state.steps += 1;
-          state.over = over;
-          setFitWidth(next);
+          const state = fitRef.current!;
+          const next = reportFit(state, data as LayoutReport);
+          if (next !== state) adopt(next);
           break;
         }
         case 'relayout':
-          // Las tipografías llegaron después de medir: se mide otra vez desde cero.
-          resetFit();
+          // Las tipografías llegaron después de medir: lo medido no vale. Se
+          // olvida y se mide otra vez desde el tamaño natural.
+          forgetModel(memoRef.current.key);
+          memoRef.current.saved = null;
+          adopt(resetFit(fitRef.current!));
+          measure();
           break;
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [bridge, resetFit, send]);
+  }, [adopt, bridge, measure, send]);
 
   useEffect(() => {
     if (readyRef.current) send({ t: 'mode', presenting });
   }, [presenting, send]);
 
-  // Al activar o desactivar el ajuste se parte del tamaño natural y se pide
-  // al puente que mida otra vez.
+  // Activar o desactivar el ajuste no borra lo aprendido: el cambio es
+  // inmediato y la siguiente medida lo confirma.
   const firstFit = useRef(true);
   useEffect(() => {
     if (firstFit.current) {
       firstFit.current = false;
       return;
     }
-    resetFit();
-    if (readyRef.current) send({ t: 'measure' });
-  }, [fit, resetFit, send]);
+    adopt(enableFit(fitRef.current!, fit));
+    measure();
+  }, [adopt, fit, measure]);
 
-  const scaled = fit && fitWidth !== null && boxWidth > 0 && fitWidth > boxWidth + 1;
-  const scale = scaled ? boxWidth / fitWidth : 1;
+  // Con el tamaño nuevo ya aplicado al marco, se pide la medida: el puente la
+  // toma en cuanto le llega el cambio. (Si solo cambia el alto, lo nota solo.)
+  useEffect(() => {
+    measure();
+  }, [measure, view]);
+
+  // Sin puente no hay medida que esperar; con él, se espera un momento.
+  useEffect(() => {
+    if (!loaded || revealed) return;
+    if (!bridge) {
+      setRevealed(true);
+      return;
+    }
+    const timer = setTimeout(() => setRevealed(true), REVEAL_TIMEOUT);
+    return () => clearTimeout(timer);
+  }, [bridge, loaded, revealed]);
+
+  const scale = view.scale;
+  const scaled = scale !== 1 && view.width > 0;
 
   useEffect(() => {
-    handlers.current.onFit?.({ scale, needed: fitNeeded });
-  }, [scale, fitNeeded]);
+    handlers.current.onFit?.({ scale, fitted });
+  }, [scale, fitted]);
 
   useEffect(() => {
     if (readyRef.current) send({ t: 'theme', theme });
@@ -321,14 +375,14 @@ export const SlideFrame = forwardRef<SlideFrameHandle, SlideFrameProps>(function
         sandbox={SANDBOX}
         allow="fullscreen; clipboard-write; autoplay"
         onLoad={() => setLoaded(true)}
-        style={scaled ? { width: fitWidth, height: `${100 / scale}%`, transform: `scale(${scale})` } : undefined}
+        style={scaled ? { width: view.width, height: `${100 / scale}%`, transform: `scale(${scale})` } : undefined}
         className={cn(
           'border-0 transition-opacity duration-200',
           scaled ? 'absolute left-0 top-0 max-w-none origin-top-left' : 'h-full w-full',
-          loaded ? 'opacity-100' : 'opacity-0',
+          revealed ? 'opacity-100' : 'opacity-0',
         )}
       />
-      {!loaded && (
+      {!revealed && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center" role="status" aria-live="polite">
           <div className="w-48">
             <div className="h-1 overflow-hidden rounded-full bg-muted">
