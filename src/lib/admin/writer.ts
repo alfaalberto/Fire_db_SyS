@@ -33,14 +33,42 @@ async function withBackoff(action: () => Promise<void>, attempts = 5): Promise<v
   }
 }
 
+/** Borrados que viajan a la vez. */
+const DELETE_PARALLEL = 6;
+
+/**
+ * Borra documentos de uno en uno, unos pocos a la vez. No se agrupan en un
+ * lote: Firestore limita cada escritura a 10 MiB contando el tamaño de los
+ * documentos que se borran, y cada trozo del curso ocupa cerca de 1 MiB (con
+ * una docena ya responde «Transaction too big»).
+ *
+ * Si un borrado falla no se empiezan más: se espera a los que estaban en
+ * curso y se devuelve el error. Lo ya borrado, borrado queda; repetir la
+ * operación continúa donde se quedó.
+ */
 async function deletePaths(db: Firestore, mod: Lite, paths: string[], onProgress?: (done: number) => void): Promise<void> {
-  const SIZE = 200;
-  for (let start = 0; start < paths.length; start += SIZE) {
-    const batch = mod.writeBatch(db);
-    for (const path of paths.slice(start, start + SIZE)) batch.delete(mod.doc(db, path));
-    await withBackoff(() => batch.commit());
-    onProgress?.(Math.min(paths.length, start + SIZE));
-  }
+  let next = 0;
+  let done = 0;
+  let failed = false;
+  let failure: unknown;
+  const worker = async () => {
+    while (!failed && next < paths.length) {
+      const path = paths[next++];
+      try {
+        await withBackoff(() => mod.deleteDoc(mod.doc(db, path)));
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
+        return;
+      }
+      done += 1;
+      onProgress?.(done);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(DELETE_PARALLEL, paths.length) }, worker));
+  if (failed) throw failure;
 }
 
 /**
@@ -260,7 +288,10 @@ export async function legacyUsage(): Promise<LegacyUsage> {
 export async function cleanLegacyStorage(scope: 'stale' | 'all', onProgress?: (done: number, total: number) => void): Promise<number> {
   const { db, mod } = await getAdminDb();
   const { all, live } = await legacyInventory();
-  const targets = (scope === 'all' ? all : all.filter((id) => !live.has(id))).map((id) => `${LEGACY_CHUNKS}/${id}`);
+  // Primero lo sobrante y al final lo vigente: si la limpieza se interrumpe,
+  // lo que se pierde antes es lo que nadie usa.
+  const stale = all.filter((id) => !live.has(id));
+  const targets = (scope === 'all' ? [...stale, ...all.filter((id) => live.has(id))] : stale).map((id) => `${LEGACY_CHUNKS}/${id}`);
   await deletePaths(db, mod, targets, (done) => onProgress?.(done, targets.length));
   if (scope === 'all') await withBackoff(() => mod.deleteDoc(mod.doc(db, LEGACY_DOC)));
   return targets.length;

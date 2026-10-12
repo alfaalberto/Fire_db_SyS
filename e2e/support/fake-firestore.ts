@@ -41,6 +41,19 @@ export function decodeFields(fields: Fields): Record<string, unknown> {
   return Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, decode(value)]));
 }
 
+const MAX_DOCUMENT_BYTES = 1_048_576;
+const MAX_COMMIT_BYTES = 10 * 1_048_576;
+
+/** Tamaño aproximado de un documento: el de sus textos y nombres de campo. */
+function sizeOf(value: unknown): number {
+  if (typeof value === 'string') return Buffer.byteLength(value);
+  if (Array.isArray(value)) return value.reduce<number>((sum, item) => sum + sizeOf(item), 0);
+  if (value && typeof value === 'object') {
+    return Object.entries(value).reduce<number>((sum, [key, item]) => sum + key.length + sizeOf(item), 0);
+  }
+  return 8;
+}
+
 export interface RequestLog {
   method: string;
   path: string;
@@ -108,6 +121,23 @@ export class FakeFirestore {
       this.log.push({ method: 'COMMIT', path: (body.writes ?? []).map((w) => (w.update ? `set ${w.update.name}` : `del ${w.delete}`)).join(',') });
       if (this.denyWrites) {
         return json(this.denyWrites, { error: { code: this.denyWrites, status: 'PERMISSION_DENIED', message: 'Missing or insufficient permissions.' } });
+      }
+      // Los límites de Firestore: 1 MiB por documento y 10 MiB por escritura,
+      // contando también el tamaño de los documentos que se borran.
+      let total = 0;
+      for (const write of body.writes ?? []) {
+        if (write.update) {
+          const bytes = sizeOf(write.update.fields ?? {});
+          if (bytes > MAX_DOCUMENT_BYTES) {
+            return json(400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: `Document cannot be written because its size (${bytes} bytes) exceeds the maximum allowed size of 1,048,576 bytes.` } });
+          }
+          total += bytes;
+        } else if (write.delete) {
+          total += sizeOf(this.docs.get(write.delete.replace(`${DOCS}/`, '')) ?? {});
+        }
+      }
+      if (total > MAX_COMMIT_BYTES) {
+        return json(400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Transaction too big. Decrease transaction size.' } });
       }
       for (const write of body.writes ?? []) {
         if (write.update) this.docs.set(write.update.name.replace(`${DOCS}/`, ''), write.update.fields ?? {});
