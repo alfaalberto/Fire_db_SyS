@@ -219,7 +219,7 @@ var DeckFit = (() => {
       spill = 0;
     } else {
       const same = chase !== null && chase.slide === slide;
-      if (!same || height > chase.height + 1) chase = { slide, spill, whole: same ? Math.max(whole, chase.whole) : whole, height, base: same ? chase.base : state.model.tall };
+      if (!same || height > chase.height + 1) chase = { slide, spill, whole, height, base: state.model.tall };
       model.tall = grow(model.tall, Math.ceil(Math.min(height + spill, box.height)));
     }
     const kept = model.col;
