@@ -266,8 +266,11 @@ test.describe('migración desde el formato anterior', () => {
   test('mantenimiento mide y libera las copias sobrantes del formato anterior', async ({ page }) => {
     const db = seedLegacy(new FakeFirestore());
     const live = db.paths('meta/fullIndex/indexChunks/').length;
+    // Copias de tamaño real (900 kB cada parte): juntas pasan de los 10 MiB
+    // que Firestore admite en una sola escritura.
+    const part = 'x'.repeat(900_000);
     for (let revision = 0; revision < 3; revision++) {
-      for (let i = 0; i < 4; i++) db.set(`meta/fullIndex/indexChunks/vieja-${revision}aaaa-${i}`, { index: 1_000_000 + i, data: 'x' });
+      for (let i = 0; i < 4; i++) db.set(`meta/fullIndex/indexChunks/vieja-${revision}aaaa-${i}`, { index: 1_000_000 + i, data: part });
     }
     db.set('meta/fullIndex/indexChunks/0', { index: 0, data: 'x' });
 

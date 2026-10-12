@@ -7,7 +7,16 @@ import { findItemById } from '../tree';
 import type { IndexItem } from '../types';
 
 // Estado compartido con el SDK simulado (vi.mock se evalúa antes que el resto).
-const shared = vi.hoisted(() => ({ rest: null as unknown as { docs: Map<string, Record<string, unknown>> }, writes: [] as string[], fail: null as string | null }));
+const shared = vi.hoisted(() => ({
+  rest: null as unknown as { docs: Map<string, Record<string, unknown>> },
+  writes: [] as string[],
+  fail: null as string | null,
+  /** Borrados que se admiten antes de empezar a fallar (`null`: todos). */
+  deleteBudget: null as number | null,
+  /** Borrados en curso a la vez, y el máximo que llegó a haber. */
+  inFlight: 0,
+  peak: 0,
+}));
 
 vi.mock('./firebase', () => {
   type Ref = { path: string };
@@ -23,15 +32,28 @@ vi.mock('./firebase', () => {
     },
     deleteDoc: async (ref: Ref) => {
       guard();
-      shared.writes.push(`del ${ref.path}`);
-      shared.rest.docs.delete(ref.path);
+      shared.inFlight += 1;
+      shared.peak = Math.max(shared.peak, shared.inFlight);
+      try {
+        // Como la red: la respuesta llega en otro turno.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (shared.deleteBudget !== null && shared.deleteBudget-- <= 0) throw Object.assign(new Error('denied'), { code: 'permission-denied' });
+        shared.writes.push(`del ${ref.path}`);
+        shared.rest.docs.delete(ref.path);
+      } finally {
+        shared.inFlight -= 1;
+      }
     },
+    // Como Firestore: una escritura en lote no admite más de 10 MiB, contando
+    // el tamaño de los documentos que borra.
     writeBatch: () => {
       const paths: string[] = [];
       return {
         delete: (ref: Ref) => paths.push(ref.path),
         commit: async () => {
           guard();
+          const bytes = paths.reduce((sum, path) => sum + JSON.stringify(shared.rest.docs.get(path) ?? {}).length, 0);
+          if (bytes > 10 * 1024 * 1024) throw Object.assign(new Error('Transaction too big. Decrease transaction size.'), { code: 'invalid-argument' });
           for (const path of paths) {
             shared.writes.push(`del ${path}`);
             shared.rest.docs.delete(path);
@@ -77,6 +99,9 @@ beforeEach(() => {
   shared.rest = rest;
   shared.writes = [];
   shared.fail = null;
+  shared.deleteBudget = null;
+  shared.inFlight = 0;
+  shared.peak = 0;
   vi.stubGlobal('fetch', rest.fetch);
 });
 
@@ -213,6 +238,59 @@ describe('migración desde el formato anterior', () => {
 
     expect(await cleanLegacyStorage('all')).toBe(2);
     expect([...rest.docs.keys()].filter((key) => key.startsWith('meta/fullIndex'))).toEqual([]);
+    expect(await legacyUsage()).toMatchObject({ hasLegacyIndex: false, chunkDocs: 0 });
+  });
+
+  it('borra copias de tamaño real sin pasarse de lo que Firestore admite en una escritura', async () => {
+    seedLegacy();
+    // Treinta trozos de 900 kB: juntos son 27 MB, y una escritura admite 10 MiB.
+    const big = 'x'.repeat(900_000);
+    for (let i = 0; i < 30; i++) rest.set(`meta/fullIndex/indexChunks/rev-zzzzzzzz-${i}`, { index: 1_000_000 + i, data: big });
+
+    const progress: Array<[number, number]> = [];
+    expect(await cleanLegacyStorage('stale', (done, total) => progress.push([done, total]))).toBe(30);
+
+    expect(progress).toEqual(Array.from({ length: 30 }, (_, i) => [i + 1, 30]));
+    // De uno en uno, y solo unos pocos a la vez.
+    expect(shared.peak).toBeGreaterThan(1);
+    expect(shared.peak).toBeLessThanOrEqual(6);
+    expect([...rest.docs.keys()].filter((key) => key.includes('indexChunks')).sort()).toEqual([
+      'meta/fullIndex/indexChunks/rev-aaaaaaaa-0',
+      'meta/fullIndex/indexChunks/rev-aaaaaaaa-1',
+    ]);
+  });
+
+  it('al borrarlo todo empieza por lo sobrante y deja lo vigente para el final', async () => {
+    seedLegacy();
+    for (let i = 0; i < 4; i++) rest.set(`meta/fullIndex/indexChunks/rev-zzzzzzzz-${i}`, { index: 1_000_000 + i, data: 'x' });
+
+    expect(await cleanLegacyStorage('all')).toBe(6);
+
+    const order = shared.writes.map((write) => write.replace('del meta/fullIndex', ''));
+    expect(order.slice(0, 4).every((path) => path.includes('rev-zzzzzzzz'))).toBe(true);
+    expect(order.slice(4, 6).every((path) => path.includes('rev-aaaaaaaa'))).toBe(true);
+    expect(order[6]).toBe('');
+  });
+
+  it('si un borrado falla no sigue borrando ni toca el manifiesto, y se puede repetir', async () => {
+    seedLegacy();
+    for (let i = 0; i < 40; i++) rest.set(`meta/fullIndex/indexChunks/rev-zzzzzzzz-${i}`, { index: 1_000_000 + i, data: 'x' });
+    shared.deleteBudget = 10;
+
+    await expect(cleanLegacyStorage('all')).rejects.toMatchObject({ code: 'permission-denied' });
+
+    const afterFailure = shared.writes.length;
+    expect(afterFailure).toBe(10);
+    // Nada queda trabajando por detrás después de avisar del error.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(shared.writes.length).toBe(afterFailure);
+    expect(shared.inFlight).toBe(0);
+    expect(rest.docs.has('meta/fullIndex')).toBe(true);
+    expect([...rest.docs.keys()].filter((key) => key.includes('rev-aaaaaaaa'))).toHaveLength(2);
+
+    // Repetir la limpieza continúa donde se quedó.
+    shared.deleteBudget = null;
+    expect(await cleanLegacyStorage('all')).toBe(32);
     expect(await legacyUsage()).toMatchObject({ hasLegacyIndex: false, chunkDocs: 0 });
   });
 });
