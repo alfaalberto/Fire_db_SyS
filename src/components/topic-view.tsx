@@ -63,7 +63,7 @@ const DeckEditor = dynamic(() => import('./admin/deck-editor').then((mod) => mod
 const LAST_KEY = 'sys.ultimo';
 /** "0" si el lector prefiere ver las presentaciones a su tamaño natural. */
 const FIT_KEY = 'sys.ajuste';
-const NO_FIT: FitState = { scale: 1, needed: false };
+const NO_FIT: FitState = { scale: 1, fitted: 1 };
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
 /** Huella barata del HTML: cambia la clave del iframe cuando cambia el contenido. */
@@ -146,7 +146,8 @@ export function TopicView({
   const presentingRef = useRef(presenting);
   presentingRef.current = presenting;
 
-  const frameKey = useMemo(() => (html === null ? '' : `${topicId}:${deckIndex}:${fingerprint(html)}`), [html, topicId, deckIndex]);
+  const contentKey = useMemo(() => (html === null ? '' : fingerprint(html)), [html]);
+  const frameKey = html === null ? '' : `${topicId}:${deckIndex}:${contentKey}`;
 
   /* ------------------------------ datos ------------------------------ */
 
@@ -344,7 +345,7 @@ export function TopicView({
     }
     if (fitState.scale < 0.995) {
       list.push({ key: 'scale', message: `No cabe a lo ancho en esta ventana: se muestra reducida al ${Math.round(fitState.scale * 100)} %.` });
-    } else if (fitState.needed) {
+    } else if (fitState.fitted < 0.995) {
       list.push({ key: 'scale', message: 'No cabe a lo ancho en esta ventana y el ajuste está desactivado: parte del contenido queda fuera.' });
     }
     return list;
@@ -483,6 +484,7 @@ export function TopicView({
         onMathRescue={setMathRescued}
         fit={fitOn}
         onFit={setFitState}
+        memoKey={contentKey}
       />
     );
   }
@@ -579,10 +581,11 @@ export function TopicView({
               <DropdownMenuItem onSelect={() => void copyLink()}>
                 <Link2 className="mr-2 h-4 w-4" /> Copiar enlace a este tema
               </DropdownMenuItem>
-              {fitState.needed && (
+              {fitState.fitted !== 1 && (
                 <DropdownMenuItem onSelect={toggleFit}>
-                  {fitOn ? <Maximize2 className="mr-2 h-4 w-4" /> : <Minimize2 className="mr-2 h-4 w-4" />}
-                  {fitOn ? `Ver a tamaño real (ahora al ${Math.round(fitState.scale * 100)} %)` : 'Ajustar al ancho de la pantalla'}
+                  {/* El icono dice hacia dónde cambia: más grande o más pequeña. */}
+                  {fitOn === fitState.fitted < 1 ? <Maximize2 className="mr-2 h-4 w-4" /> : <Minimize2 className="mr-2 h-4 w-4" />}
+                  {fitOn ? `Ver a tamaño real (ahora al ${Math.round(fitState.scale * 100)} %)` : 'Ajustar al tamaño de la pantalla'}
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem disabled={html === null} onSelect={() => html !== null && downloadDeck(html, deckTitle ?? item!.title)}>

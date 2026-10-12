@@ -163,7 +163,7 @@ test.describe('presentaciones que no caben a lo ancho', () => {
     await expect(frame(page)).toHaveCSS('transform', 'none');
 
     await page.getByRole('button', { name: 'Más opciones' }).click();
-    await page.getByRole('menuitem', { name: 'Ajustar al ancho de la pantalla' }).click();
+    await page.getByRole('menuitem', { name: 'Ajustar al tamaño de la pantalla' }).click();
     await expect(frame(page)).toHaveCSS('transform', /^matrix\(0\.87/);
   });
 });
