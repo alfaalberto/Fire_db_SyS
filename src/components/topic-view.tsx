@@ -13,14 +13,17 @@ import {
   Minimize2,
   MoreHorizontal,
   PanelLeft,
+  Pencil,
   Play,
   RotateCw,
+  Trash2,
   Upload,
   Wrench,
 } from 'lucide-react';
 import { topicContent, type CourseState, type CourseStore } from '@/lib/data/course-store';
 import { downloadDeck, downloadTopic } from '@/lib/download-presentation';
 import { hasDecks, neighbourPositions } from '@/lib/outline';
+import { indexAfterMove, moveTo } from '@/lib/reorder';
 import { inspectSlide, repairSlide } from '@/lib/slide-document';
 import { findItemById, getBreadcrumbs } from '@/lib/tree';
 import type { CoursePosition, OutlineItem } from '@/lib/types';
@@ -404,12 +407,10 @@ export function TopicView({
         onWrite: () => setEditor({ index: null }),
         onEdit: (index) => setEditor({ index }),
         onReplace: (index) => openFilePicker(index),
-        onMove: (index, dir) => {
-          const to = index + dir;
-          if (to < 0 || to >= currentDecks.length) return;
-          const next = [...currentDecks];
-          [next[index], next[to]] = [next[to], next[index]];
-          commitDecks(next, to);
+        onReorder: (from, to) => {
+          if (from === to || from < 0 || to < 0 || from >= currentDecks.length || to >= currentDecks.length) return;
+          // La presentación que se estaba viendo sigue a la vista, quede donde quede.
+          commitDecks(moveTo(currentDecks, from, to), indexAfterMove(deckIndex, from, to));
         },
         onDownload: (index) => downloadDeck(currentDecks[index], metas[index]?.title ?? item!.title),
         onDelete: (index) => setPendingDelete(index),
@@ -607,6 +608,23 @@ export function TopicView({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          {canEdit && html !== null && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="hidden text-muted-foreground hover:text-destructive sm:inline-flex"
+                onClick={() => setPendingDelete(deckIndex)}
+                title="Eliminar esta presentación"
+                aria-label="Eliminar esta presentación"
+              >
+                <Trash2 />
+              </Button>
+              <Button variant="outline" size="sm" className="ml-1" onClick={() => setEditor({ index: deckIndex })} title="Editar el HTML de esta presentación" aria-label="Editar">
+                <Pencil /> <span className="hidden sm:inline">Editar</span>
+              </Button>
+            </>
+          )}
           <Button onClick={startPresenting} disabled={!canPresent} size="sm" className="ml-1">
             <Play /> Presentar
           </Button>

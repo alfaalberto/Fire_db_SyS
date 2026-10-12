@@ -65,14 +65,19 @@ que cada visitante descargaba completo. La actual separa el temario
 
 ## Editar el curso
 
-Con sesión de docente aparece **Docente → Modo edición**.
+Con sesión de docente las herramientas de edición están a la vista. Para ver el
+curso como lo ven los alumnos, desmarca **Editando → Modo edición** (la preferencia
+se recuerda en ese navegador).
 
 - Los cambios se guardan en un **borrador en este navegador**; los alumnos no ven
   nada hasta pulsar **Publicar**. «Descartar» vuelve a lo publicado.
-- **Temario:** arrastrar para reordenar, y el menú «⋯» de cada tema para renombrar,
-  añadir subtemas o eliminar. La numeración se actualiza sola.
-- **Presentaciones:** subir uno o varios `.html`, arrastrarlos sobre el tema, pegar
-  el código, reemplazar, reordenar, descargar o eliminar.
+- **Temario:** arrastrar un tema para moverlo (antes, después o dentro de otro), y
+  el menú «⋯» de cada tema para renombrar, añadir subtemas o eliminar. La
+  numeración se actualiza sola.
+- **Presentaciones:** el botón **Editar** abre el HTML de la que se está viendo;
+  **Añadir** sube uno o varios `.html` (también se pueden arrastrar sobre el tema)
+  o deja pegar el código. Las pestañas se **arrastran para cambiar el orden**, y el
+  menú «⋯» de cada una permite reemplazarla, moverla, descargarla o eliminarla.
 - **Docente → Exportar / Importar respaldo:** un archivo JSON con todo el curso.
 - Si dos personas editan a la vez, al publicar se avisa del conflicto en lugar de
   sobrescribir.

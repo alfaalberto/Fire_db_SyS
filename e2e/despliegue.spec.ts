@@ -87,8 +87,7 @@ test.describe('fórmulas que el archivo deja en crudo', () => {
     const db = lab();
     await signInAsTeacher(page, db);
     await openApp(page, db, '#/t/lab-formulas/1');
-    await page.getByRole('button', { name: 'Docente', exact: true }).click();
-    await page.getByRole('menuitemcheckbox', { name: 'Modo edición' }).click();
+    // Con sesión de docente las herramientas de edición ya están a la vista.
     await expect(page.getByText(/3 fórmulas quedan en crudo al abrir el archivo por separado/)).toBeVisible();
     // A los alumnos no se les muestra.
     await page.getByRole('button', { name: 'Editando' }).click();

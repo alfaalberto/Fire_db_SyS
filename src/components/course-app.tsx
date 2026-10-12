@@ -37,6 +37,8 @@ import { readLastVisited, TopicView } from './topic-view';
 const MaintenanceDialog = dynamic(() => import('./admin/maintenance-dialog').then((mod) => mod.MaintenanceDialog), { ssr: false });
 
 const PANEL_KEY = 'sys.panel';
+/** "0" si el docente prefiere ver el curso como lo ven los alumnos. */
+const EDIT_KEY = 'sys.edicion';
 
 const PHASE_TEXT: Record<PublishProgress['phase'], string> = {
   checking: 'Comprobando el servidor',
@@ -71,7 +73,9 @@ export function CourseApp({ initial }: { initial: CourseSnapshot | null }) {
   const [isDesktop, setIsDesktop] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [presenting, setPresenting] = useState(false);
-  const [editWanted, setEditWanted] = useState(false);
+  // Con sesión de docente las herramientas de edición están a la vista, salvo
+  // que él mismo las haya ocultado (la preferencia se recuerda).
+  const [editWanted, setEditWanted] = useState(true);
   const [lastVisited, setLastVisited] = useState<CoursePosition | null>(null);
   const [publishing, setPublishing] = useState<PublishProgress | null>(null);
   const [conflict, setConflict] = useState(false);
@@ -86,8 +90,9 @@ export function CourseApp({ initial }: { initial: CourseSnapshot | null }) {
   useEffect(() => {
     try {
       setCollapsed(localStorage.getItem(PANEL_KEY) === '0');
+      if (localStorage.getItem(EDIT_KEY) === '0') setEditWanted(false);
     } catch {
-      // Preferencia opcional.
+      // Preferencias opcionales.
     }
     setLastVisited(readLastVisited());
     const query = window.matchMedia('(min-width: 768px)');
@@ -128,6 +133,15 @@ export function CourseApp({ initial }: { initial: CourseSnapshot | null }) {
     // Cualquier cambio de tema (también con atrás/adelante) cierra el panel móvil.
     setDrawerOpen(false);
   }, [selection.topicId, selection.deck]);
+
+  const changeEditMode = useCallback((value: boolean) => {
+    setEditWanted(value);
+    try {
+      localStorage.setItem(EDIT_KEY, value ? '1' : '0');
+    } catch {
+      // La preferencia vale solo para esta visita.
+    }
+  }, []);
 
   const toggleSidebar = useCallback(() => {
     if (isDesktop) {
@@ -316,7 +330,7 @@ export function CourseApp({ initial }: { initial: CourseSnapshot | null }) {
     <AdminMenu
       admin={admin}
       editMode={editMode}
-      onEditModeChange={setEditWanted}
+      onEditModeChange={changeEditMode}
       onRenumber={renumber}
       onExport={() => void exportBackup()}
       onImport={(file) => void importBackup(file)}

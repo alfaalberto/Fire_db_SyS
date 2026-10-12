@@ -1,19 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
 import { ADMIN_EMAIL, expectHeading, openApp, REV, seedLegacy, seedV2, signInAsTeacher } from './support/app';
 import { FakeFirestore } from './support/fake-firestore';
-import { course, deckA, deckB, indexOf, wrappedDeck } from './support/fixtures';
+import { course, deckA, deckB, deckC, indexOf, wrappedDeck } from './support/fixtures';
 
 const newDeck = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Ejemplo nuevo · Muestreo</title></head><body><h1 data-testid="heading">Nuevo</h1></body></html>`;
 
+/** Abre la app con sesión de docente: las herramientas de edición ya están a la vista. */
 async function teacher(page: Page, db: FakeFirestore, hash = ''): Promise<void> {
   await signInAsTeacher(page, db);
   await openApp(page, db, hash);
-  await expect(page.getByRole('button', { name: 'Docente', exact: true })).toBeVisible();
-}
-
-async function enterEditMode(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Docente', exact: true }).click();
-  await page.getByRole('menuitemcheckbox', { name: 'Modo edición' }).click();
   await expect(page.getByRole('button', { name: 'Editando' })).toBeVisible();
 }
 
@@ -63,7 +58,6 @@ test.describe('edición y publicación', () => {
   test('subir una presentación, publicarla y verla en la base de datos', async ({ page }) => {
     const db = seedV2(new FakeFirestore());
     await teacher(page, db, '#/t/cap1-intro');
-    await enterEditMode(page);
 
     await upload(page, 'nuevo.html', newDeck);
     await expect(toast(page, 'Presentación añadida al borrador')).toBeVisible();
@@ -92,7 +86,6 @@ test.describe('edición y publicación', () => {
   test('el borrador sobrevive a recargar la página y se puede descartar', async ({ page }) => {
     const db = seedV2(new FakeFirestore());
     await teacher(page, db, '#/t/cap1-intro');
-    await enterEditMode(page);
     await upload(page, 'nuevo.html', newDeck);
     await expect(page.getByText('Hay cambios sin publicar')).toBeVisible();
     await page.waitForTimeout(700);
@@ -111,7 +104,6 @@ test.describe('edición y publicación', () => {
   test('eliminar, reordenar y editar presentaciones de un tema', async ({ page }) => {
     const db = seedV2(new FakeFirestore());
     await teacher(page, db, '#/t/cap1-senales');
-    await enterEditMode(page);
 
     // Mover la primera (A) después de la segunda (B).
     await page.getByRole('button', { name: 'Opciones de la presentación 1' }).click();
@@ -135,10 +127,97 @@ test.describe('edición y publicación', () => {
     expect(db.get('slides/cap1-senales')!.content).toEqual([deckB, newDeck]);
   });
 
+  test('al entrar como docente las herramientas están a la vista, y ocultarlas se recuerda', async ({ page }) => {
+    const db = seedV2(new FakeFirestore());
+    await teacher(page, db, '#/t/cap1-senales');
+    await expect(page.getByRole('button', { name: 'Editar', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Opciones de la presentación 1' })).toBeVisible();
+
+    // Ver el curso como lo ven los alumnos.
+    await page.getByRole('button', { name: 'Editando' }).click();
+    await page.getByRole('menuitemcheckbox', { name: 'Modo edición' }).click();
+    await expect(page.getByRole('button', { name: 'Editar', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Opciones de la presentación 1' })).toHaveCount(0);
+
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Docente', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Editar', exact: true })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Docente', exact: true }).click();
+    await page.getByRole('menuitemcheckbox', { name: 'Modo edición' }).click();
+    await expect(page.getByRole('button', { name: 'Editar', exact: true })).toBeVisible();
+  });
+
+  test('el botón «Editar» abre la presentación que se está viendo', async ({ page }) => {
+    const db = seedV2(new FakeFirestore());
+    await teacher(page, db, '#/t/cap1-senales/2');
+    await expectHeading(page, 'B1');
+
+    await page.getByRole('button', { name: 'Editar', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: /Editar presentación 2 de/ })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Código HTML de la presentación' }).fill(newDeck);
+    await page.getByRole('button', { name: 'Guardar en el borrador' }).click();
+    await expectHeading(page, 'Nuevo');
+
+    // Y el de la papelera, la misma: pide confirmación antes de quitarla.
+    await page.getByRole('button', { name: 'Eliminar esta presentación' }).click();
+    await expect(page.getByRole('alertdialog', { name: '¿Eliminar esta presentación?' })).toContainText('Ejemplo nuevo · Muestreo');
+    await page.getByRole('button', { name: 'Cancelar' }).click();
+    await expect(page.getByRole('tab')).toHaveCount(3);
+
+    await publish(page);
+    expect(db.get('slides/cap1-senales')!.content).toEqual([deckA, newDeck, deckC]);
+  });
+
+  test('las presentaciones se reordenan arrastrando su pestaña', async ({ page }) => {
+    const db = seedV2(new FakeFirestore());
+    await teacher(page, db, '#/t/cap1-senales');
+    const tabs = page.getByRole('tab');
+    await expect(tabs).toHaveCount(3);
+    await expectHeading(page, 'A1');
+
+    // La primera (A) al final: se suelta sobre la mitad derecha de la última.
+    const last = await tabs.nth(2).boundingBox();
+    await tabs.nth(0).dragTo(tabs.nth(2), { targetPosition: { x: last!.width - 4, y: last!.height / 2 } });
+    await expect(tabs.nth(0)).toContainText('Deck B');
+    await expect(tabs.nth(2)).toContainText('Deck A');
+    // La que se estaba viendo sigue a la vista, ahora en tercer lugar.
+    await expect(page.getByRole('tab', { selected: true })).toContainText('Deck A');
+    await expectHeading(page, 'A1');
+
+    // Y la última (A) de vuelta al principio: sobre la mitad izquierda de la primera.
+    await tabs.nth(2).dragTo(tabs.nth(0), { targetPosition: { x: 4, y: last!.height / 2 } });
+    await expect(tabs.nth(0)).toContainText('Deck A');
+
+    // Soltarla donde ya está no cambia nada.
+    await tabs.nth(1).dragTo(tabs.nth(0), { targetPosition: { x: (await tabs.nth(0).boundingBox())!.width - 4, y: last!.height / 2 } });
+    await expect(tabs.nth(1)).toContainText('Deck B');
+
+    await tabs.nth(1).dragTo(tabs.nth(2), { targetPosition: { x: last!.width - 4, y: last!.height / 2 } });
+    await publish(page);
+    expect(db.get('slides/cap1-senales')!.content).toEqual([deckA, deckC, deckB]);
+  });
+
+  test('los temas se mueven arrastrándolos en el temario', async ({ page }) => {
+    const db = seedV2(new FakeFirestore());
+    await teacher(page, db);
+    await page.getByRole('button', { name: /^1 Señales y Sistemas/ }).click();
+
+    const row = (name: RegExp) => page.getByRole('treeitem').filter({ has: page.getByRole('button', { name }) }).last().locator('> div[draggable]');
+    const intro = row(/^1\.1 Introducción/);
+    const energy = row(/^1\.3 Señales de energía/);
+    const box = await energy.boundingBox();
+    // Se suelta en el borde inferior de 1.3: queda justo después.
+    await intro.dragTo(energy, { targetPosition: { x: box!.width / 2, y: box!.height - 2 } });
+
+    await expect(page.getByText('Hay cambios sin publicar')).toBeVisible();
+    await publish(page);
+    expect(outline(db)[0].children!.map((topic) => topic.id)).toEqual(['cap1-senales', 'cap1-vacio', 'cap1-intro', 'cap1-doc']);
+  });
+
   test('pegar el guion generador avisa y se repara con un clic', async ({ page }) => {
     const db = seedV2(new FakeFirestore());
     await teacher(page, db, '#/t/cap1-vacio');
-    await enterEditMode(page);
     await page.getByRole('button', { name: 'Pegar HTML' }).click();
     await page.getByRole('textbox', { name: 'Código HTML de la presentación' }).fill(wrappedDeck);
     await expect(page.getByText(/Hay texto fuera del documento HTML/)).toBeVisible();
@@ -152,7 +231,6 @@ test.describe('edición y publicación', () => {
   test('renombrar, añadir y eliminar temas', async ({ page }) => {
     const db = seedV2(new FakeFirestore());
     await teacher(page, db);
-    await enterEditMode(page);
     await page.getByRole('button', { name: /^1 Señales y Sistemas/ }).click();
 
     await page.getByRole('button', { name: 'Opciones de 1.1 Introducción' }).click();
@@ -181,7 +259,6 @@ test.describe('edición y publicación', () => {
   test('si Firestore rechaza la escritura, el borrador queda intacto', async ({ page }) => {
     const db = seedV2(new FakeFirestore());
     await teacher(page, db, '#/t/cap1-intro');
-    await enterEditMode(page);
     await upload(page, 'nuevo.html', newDeck);
     db.denyWrites = 403;
     await page.getByRole('button', { name: 'Publicar', exact: true }).click();
@@ -193,7 +270,6 @@ test.describe('edición y publicación', () => {
   test('si el curso cambió en otro dispositivo, pide confirmación antes de sobrescribir', async ({ page }) => {
     const db = seedV2(new FakeFirestore());
     await teacher(page, db, '#/t/cap1-intro');
-    await enterEditMode(page);
     await upload(page, 'nuevo.html', newDeck);
     // Otro dispositivo publica mientras tanto.
     db.set('meta/outline', { ...db.get('meta/outline')!, updatedAt: REV + 5 });
@@ -275,7 +351,7 @@ test.describe('migración desde el formato anterior', () => {
     db.set('meta/fullIndex/indexChunks/0', { index: 0, data: 'x' });
 
     await teacher(page, db);
-    await page.getByRole('button', { name: 'Docente', exact: true }).click();
+    await page.getByRole('button', { name: 'Editando' }).click();
     await page.getByRole('menuitem', { name: 'Mantenimiento' }).click();
     await page.getByRole('button', { name: 'Analizar' }).click();
     await expect(page.getByText(new RegExp(`Hay ${live + 13} partes guardadas y solo ${live} están en uso`))).toBeVisible();
@@ -293,7 +369,7 @@ test.describe('migración desde el formato anterior', () => {
   test('la revisión del curso lista los problemas de contenido', async ({ page }) => {
     const db = seedV2(new FakeFirestore());
     await teacher(page, db);
-    await page.getByRole('button', { name: 'Docente', exact: true }).click();
+    await page.getByRole('button', { name: 'Editando' }).click();
     await page.getByRole('menuitem', { name: 'Mantenimiento' }).click();
     await page.getByRole('button', { name: 'Revisar todo el curso' }).click();
     await expect(page.getByText('2.2 Suma de convolución, presentación 1')).toBeVisible();
