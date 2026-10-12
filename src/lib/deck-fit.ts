@@ -149,8 +149,9 @@ export interface FitState {
   /** Láminas cuyo desborde a lo alto no depende de la ventana: no limitan. */
   scrolls: number[];
   /**
-   * Lámina a la que se le está dando más alto: lo que le sobraba (y cuánto de
-   * ello era alto de más del documento), con qué alto, y lo que se sabía antes.
+   * Lámina a la que se le está dando más alto: lo que le sobraba en la última
+   * medida (y cuánto de ello era alto de más del documento), con qué alto, y
+   * el alto que se le tenía concedido entonces.
    */
   chase: { slide: number; spill: number; whole: number; height: number; base: number | null } | null;
   /** Cambios de tamaño desde la última vez que se partió de cero. */
@@ -446,9 +447,11 @@ export function reportFit(state: FitState, report: LayoutReport): FitState {
     chase = null;
     spill = 0;
   } else {
-    // Cabía (o podría caber) con más alto: se rebaja la ampliación.
+    // Cabía (o podría caber) con más alto: se rebaja la ampliación. Si ya se
+    // le había dado más y sirvió, lo concedido se queda: lo que pueda haber
+    // que deshacer es solo lo que se le dé ahora por lo que todavía sobra.
     const same = chase !== null && chase.slide === slide;
-    if (!same || height > chase!.height + 1) chase = { slide, spill, whole: same ? Math.max(whole, chase!.whole) : whole, height, base: same ? chase!.base : state.model.tall };
+    if (!same || height > chase!.height + 1) chase = { slide, spill, whole, height, base: state.model.tall };
     model.tall = grow(model.tall, Math.ceil(Math.min(height + spill, box.height)));
   }
 

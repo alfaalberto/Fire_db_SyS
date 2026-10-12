@@ -397,6 +397,25 @@ describe('ampliar no hace que nada deje de caber', () => {
     expect(full.state.model.col).toBe(1331);
   });
 
+  it('el alto que sí hizo falta se conserva aunque el resto resulte ser alto de más del documento', () => {
+    // Ampliada por una lámina corta, llega a otra de 896 px de contenido en un
+    // documento que mide siempre 22 px de más.
+    const deck: Deck = (width, height) => {
+      const over = Math.max(0, 896 - height);
+      return { need: width, side: Math.floor((width - 1298) / 2), vfree: 0, vover: over, vdoc: over + 22, slide: 4 };
+    };
+    const { state, views } = run(deck, createFit(SCREEN, true, { ...EMPTY_MODEL, col: 1330, tall: 760 }));
+    // Se le da el alto que pide (918, con esos 22 px), se prueba a darle 22 más
+    // y, como no sirven, solo se deshace eso último: no se vuelve al principio.
+    const wide = (tall: number) => Math.ceil((tall * 1920) / 1080);
+    expect(views).toEqual([wide(760), wide(918), wide(940), wide(918)]);
+    expect(state.model.tall).toBe(918);
+    // Lo que se anota como alto de más son los 22 px, no lo que sobraba antes.
+    expect(state.model.slack).toBe(22);
+    expect(state.scrolls).toEqual([]);
+    expect(run(deck, createFit(SCREEN, true, state.model)).changes).toBe(0);
+  });
+
   it('si el contenido llega al pie de la ventana, el alto de más del documento es suyo y se cuenta', () => {
     // Una lámina de 891 px de alto: 868 de contenido y 23 de relleno por debajo.
     const padded: Deck = (width, height) => ({ need: width, side: Math.floor((width - 1296) / 2), vfree: 0, vover: Math.max(0, 868 - height), vdoc: Math.max(0, 891 - height), slide: 0 });
